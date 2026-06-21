@@ -66,11 +66,14 @@ static bool valid_data_opcode(u8 op) {
     return op == WS_OP_CONTINUATION || op == WS_OP_TEXT || op == WS_OP_BINARY;
 }
 
+static bool valid_control_opcode(u8 op) {
+    return op == WS_OP_CLOSE || op == WS_OP_PING || op == WS_OP_PONG;
+}
+
 // Control frames: must be FIN, <=125 bytes, and a known control opcode (§5.5).
 static bool control_ok(const ws_frame_header *h) {
-    if (!h->fin || h->payload_len > 125)
-        return false;
-    return h->opcode == WS_OP_CLOSE || h->opcode == WS_OP_PING || h->opcode == WS_OP_PONG;
+    bool sized = h->fin && h->payload_len <= 125;
+    return sized && valid_control_opcode(h->opcode);
 }
 
 // Data frames: valid opcode and consistent with fragmentation state.
@@ -83,13 +86,23 @@ static bool data_ok(const conn_impl *m, const ws_frame_header *h) {
     return true;
 }
 
+static bool rsv_set(const ws_frame_header *h) {
+    return h->rsv1 || h->rsv2 || h->rsv3;
+}
+
+// Mask rule (§5.1): a server must receive masked client frames.
+static bool mask_ok(const conn_impl *m, const ws_frame_header *h) {
+    return m->role != WS_ROLE_SERVER || h->masked;
+}
+
+// Opcode-specific framing rules: control vs data.
+static bool body_ok(const conn_impl *m, const ws_frame_header *h) {
+    return is_control(h->opcode) ? control_ok(h) : data_ok(m, h);
+}
+
 // Validate a freshly parsed header against RFC6455 framing rules.
 static bool header_ok(conn_impl *m, const ws_frame_header *h) {
-    if (h->rsv1 || h->rsv2 || h->rsv3)
-        return false;
-    if (m->role == WS_ROLE_SERVER && !h->masked)
-        return false; // client must mask (§5.1)
-    return is_control(h->opcode) ? control_ok(h) : data_ok(m, h);
+    return !rsv_set(h) && mask_ok(m, h) && body_ok(m, h);
 }
 
 // --- payload assembly into the message buffer ---
@@ -135,9 +148,13 @@ static void accept_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     m->ev_pending = WS_EV_MESSAGE;
 }
 
+static bool in_range(u16 c, u16 lo, u16 hi) {
+    return c >= lo && c <= hi;
+}
+
 // Valid received close codes (RFC6455 §7.4.1): 1000-1003, 1007-1011, 3000-4999.
 static bool valid_close_code(u16 c) {
-    return (c >= 1000 && c <= 1003) || (c >= 1007 && c <= 1011) || (c >= 3000 && c <= 4999);
+    return in_range(c, 1000, 1003) || in_range(c, 1007, 1011) || in_range(c, 3000, 4999);
 }
 
 // Reserved codes that MUST NOT appear on the wire (§7.4.1).
