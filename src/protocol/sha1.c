@@ -27,7 +27,7 @@ static u32 sha1_k(unsigned t) {
 
 static void sha1_block(u32 h[5], const u8 *p) {
     u32 w[80];
-    for (unsigned i = 0; i < 16; i++)
+    for (size_t i = 0; i < 16; i++)
         w[i] = ((u32) p[4 * i] << 24) | ((u32) p[4 * i + 1] << 16) | ((u32) p[4 * i + 2] << 8) |
                (u32) p[4 * i + 3];
     for (unsigned i = 16; i < 80; i++)
@@ -75,7 +75,7 @@ void ws_sha1(const u8 *data, size_t len, u8 out[20]) {
     if (total == 128)
         sha1_block(h, buf + 64);
 
-    for (unsigned k = 0; k < 5; k++) {
+    for (size_t k = 0; k < 5; k++) {
         out[4 * k] = (u8) (h[k] >> 24);
         out[4 * k + 1] = (u8) (h[k] >> 16);
         out[4 * k + 2] = (u8) (h[k] >> 8);

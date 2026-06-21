@@ -142,6 +142,8 @@ static int run(void) {
 // Freestanding entry point. The kernel jumps here with RSP 16-byte aligned,
 // but the SysV ABI expects RSP%16==8 on function entry (as if after a CALL).
 // Align then call so SSE moves (movaps) in callees don't fault.
+// _start is the mandated process entry symbol; the reserved name is required.
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c)
 __attribute__((naked, noreturn)) void _start(void) {
     __asm__ volatile("xor %rbp, %rbp\n\t" // mark outermost frame
                      "and $-16, %rsp\n\t" // 16-byte align

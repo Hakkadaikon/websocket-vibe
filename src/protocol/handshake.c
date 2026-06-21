@@ -20,7 +20,9 @@ void ws_handshake_accept(const char *key, size_t key_len, char out[WS_ACCEPT_KEY
 }
 
 static char lower(char c) {
-    return (c >= 'A' && c <= 'Z') ? (char) (c + 32) : c;
+    if (c >= 'A' && c <= 'Z')
+        return (char) ((unsigned char) c | 0x20u); // ASCII to-lower, no narrowing
+    return c;
 }
 
 // Case-insensitive compare of `req[at..]` against header name `name` (NUL-term).
