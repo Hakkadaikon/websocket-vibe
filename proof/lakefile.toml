@@ -1,0 +1,5 @@
+name = "ws"
+defaultTargets = ["WsProof"]
+
+[[lean_lib]]
+name = "WsProof"
