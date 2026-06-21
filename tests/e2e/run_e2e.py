@@ -94,6 +94,37 @@ def test_bad_utf8_rejected():
     c.close()
 
 
+def test_concurrent_clients():
+    # Open several clients at once; the epoll-multiplexed server must service
+    # them independently (interleaved sends must not cross-talk).
+    n = 8
+    clients = [connect() for _ in range(n)]
+    for i, c in enumerate(clients):
+        c.send_frame(OP_TEXT, f"client-{i}".encode())
+    ok = True
+    for i, c in enumerate(clients):
+        fin, op, pl = c.recv_frame()
+        ok = ok and fin and op == OP_TEXT and pl == f"client-{i}".encode()
+    for c in clients:
+        c.close()
+    check("concurrent_clients", ok)
+
+
+def test_interleaved_clients():
+    # Two long-lived clients exchanging in alternation share no aggregation state.
+    a, b = connect(), connect()
+    ok = True
+    for r in range(5):
+        a.send_frame(OP_TEXT, f"a{r}".encode())
+        b.send_frame(OP_TEXT, f"b{r}".encode())
+        _, _, pa = a.recv_frame()
+        _, _, pb = b.recv_frame()
+        ok = ok and pa == f"a{r}".encode() and pb == f"b{r}".encode()
+    a.close()
+    b.close()
+    check("interleaved_clients", ok)
+
+
 def main():
     if not os.path.exists(SERVER):
         print(f"server binary missing: {SERVER} (run `just build` first)")
@@ -111,6 +142,7 @@ def main():
         for t in (
             test_echo_text, test_echo_binary, test_ping_pong, test_fragmented_text,
             test_large_message, test_close_handshake, test_bad_utf8_rejected,
+            test_concurrent_clients, test_interleaved_clients,
         ):
             try:
                 t()
