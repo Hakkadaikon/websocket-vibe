@@ -2,8 +2,6 @@
 
 C23 で書いた RFC6455 WebSocket プロトコルスタック（SDK）である。
 libc に依存しない freestanding 実装で、x86-64 Linux の syscall を inline asm で直接発行し、ランタイムに何も要求しない。
-開発は形式検証ファーストで進める。
-各プロトコル仕様を Lean 4 で証明してから、その証明済みの定義を正準仕様として C 実装を書く。
 I/O は sans-IO コアに閉じ込め、付属のデモサーバが epoll でこれを駆動する。
 
 ## ディレクトリ構造
@@ -14,10 +12,7 @@ src/core/       RFC6455 §5 のフレーム処理（マスキング、ヘッダ 
 src/protocol/   RFC6455 §4 のハンドシェイク（SHA-1、base64、accept key、HTTP パース）
 src/sdk/        公開 API。sans-IO 接続状態機械と freestanding デモエコーサーバ
 include/ws/     公開ヘッダ（types.h、frame.h、ws.h）
-proof/          Lean 4 の形式検証（数学的性質とプロトコル仕様）
-tests/          ユニットテスト（unit/）と Python による E2E テスト（e2e/）
 examples/       SDK の利用サンプル（echo/ はテキストを echo back する）
-docs/           開発ガイド（development.md）とセキュリティ（security.md）
 ```
 
 ## 使い方
@@ -74,9 +69,8 @@ size_t n = ws_send_message(&c, WS_OP_TEXT, payload, payload_len, out, sizeof out
 | TLS / wss://（§3） | 未実装（平文のみ） |
 | I/O モデル | sans-IO コア + epoll 多重化デモサーバ（最大64同時接続） |
 
-## ドキュメント
+## セキュリティ
 
-ビルド、品質ゲート、形式検証ワークフロー、性能の詳細は [docs/development.md](docs/development.md) を参照する。
 マスク鍵の扱い、入力検証、TLS 未対応の注意などセキュリティ上の設計は [docs/security.md](docs/security.md) を参照する。
 
 ## ライセンス
