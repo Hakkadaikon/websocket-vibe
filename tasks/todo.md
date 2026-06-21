@@ -19,23 +19,33 @@
 - bench: ローカルでフレーム処理スループット計測 → 自己改善ループ
 
 ## 形式検証 (実装の前に証明) — Lean 4
-- [ ] P1: masking XOR involution (mask(mask(x))=x), 長さ保存
-- [ ] P2: payload length codec roundtrip (decode∘encode = id, 3 形式)
-- [ ] P3: UTF-8 validator 健全性 (受理 ⇔ 整形式)
-- 証明済み述語 → C テストへ橋渡し (test-first)
+- [x] P1: masking XOR involution (mask(mask(x))=x), 長さ保存
+- [x] P2: payload length codec roundtrip (decode∘encode = id, 3 形式) + 単射性
+- [x] P3: UTF-8 validator 健全性 + 完全性 (受理 ⇔ 整形式)
+- [x] 証明済み述語 → C テストへ橋渡し (test-first)。全 sorry なし・sorryAx 非依存。
 
 ## 実装フェーズ (各 test-first)
-- [ ] F0: 足場 (flake.nix, justfile, .clang-* , 最小 freestanding ビルド通す)
-- [ ] F1: platform 層 (syscall, mem*) + unit test
-- [ ] F2: core/masking (P1) test-first
-- [ ] F3: core/frame codec (P2) test-first
-- [ ] F4: core/utf8 (P3) test-first
-- [ ] F5: protocol/handshake (SHA1 + base64 accept key) test-first
-- [ ] F6: protocol/state machine + fragmentation
-- [ ] F7: sdk 公開 API + I/O ループ
-- [ ] F8: E2E ハーネス
-- [ ] F9: bench + 自己改善
-- [ ] F10: CI 集約 (just ci)
+- [x] F0: 足場 (flake.nix, justfile, .clang-* , freestanding ビルド)
+- [x] F1: platform 層 (syscall, mem*) + unit test
+- [x] F2: core/masking (P1) test-first
+- [x] F3: core/frame codec (P2) test-first
+- [x] F4: core/utf8 (P3) test-first
+- [x] F5: protocol/handshake (SHA1 + base64 accept key) test-first
+- [x] F6: protocol/state machine + fragmentation (conn.c)
+- [x] F7: sdk 公開 API (ws.h) + freestanding server (_start)
+- [x] F8: E2E ハーネス (stdlib のみ Python クライアント)
+- [x] F9: bench + 自己改善 (mask 18x)
+- [x] F10: CI 集約 (just ci 緑)
 
 ## レビュー欄
-(完了後に記入)
+- 形式検証を実装の前に完了し、証明済み定義をそのまま C テストのオラクルにした。
+  proof と実装の乖離は test_mask/test_frame/test_utf8 が検出する。
+- レイヤード: platform → core → protocol → sdk。各層は下位のみ依存、公開は include/ws/。
+- libc 非依存を維持: freestanding 個別コンパイル成功、mask は __builtin_memcpy が
+  MOV へ完全インライン化されリロケーション無し (nm で確認済み)。
+- 品質ゲートは just ci に集約: proof / lint(tidy=error) / cyclo(CCN<=10) / build /
+  unit / e2e(実TCP) / bench。全て緑。
+- 自己改善ループの実証: bench で計測 → mask を 64bit ワード化 → 約18倍、性質は不変。
+- 既知の簡略化 (ponytail): デモサーバは単一接続・逐次。client 送信マスク鍵は固定
+  (本番 client は CSPRNG が必要、server ロールには無影響)。close は即時応答型。
+  いずれも SDK コア (sans-IO) の正しさには影響せず、需要が出たら拡張する。
