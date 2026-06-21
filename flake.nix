@@ -26,7 +26,7 @@
         devShells.default = pkgs.mkShell {
           name = "ws-dev";
           packages = with pkgs; [
-            clang_19          # C23 + freestanding
+            clang_19          # C23 + freestanding; bundles ASan/UBSan/LSan runtimes (just sanitize)
             lld_19
             llvmPackages_19.clang-tools  # clang-tidy, clang-format
             just
