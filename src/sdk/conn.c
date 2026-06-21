@@ -133,12 +133,25 @@ static void accept_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     m->ev_pending = WS_EV_MESSAGE;
 }
 
+// Valid received close codes (RFC6455 §7.4.1): 1000-1003, 1007-1011, 3000-4999.
+static bool valid_close_code(u16 c) {
+    return (c >= 1000 && c <= 1003) || (c >= 1007 && c <= 1011) || (c >= 3000 && c <= 4999);
+}
+
+// Reserved codes that MUST NOT appear on the wire (§7.4.1).
+static bool reserved_close_code(u16 c) {
+    return c == 1005 || c == 1006 || c == 1015;
+}
+
 // Control frames carry their own (un-aggregated) payload via the staging area.
 static void accept_control(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     if (h->opcode == WS_OP_CLOSE) {
-        u16 code = 1005; // "no status" default
-        if (h->payload_len >= 2)
+        u16 code = 1005; // "no status" default when no body is present
+        if (h->payload_len >= 2) {
             code = (u16) ((pl[0] << 8) | pl[1]);
+            if (!valid_close_code(code))
+                code = 1002; // M-07: out-of-range code -> Protocol Error
+        }
         m->ev.type = WS_EV_CLOSE;
         m->ev.close_code = code;
         m->ev_pending = WS_EV_CLOSE;
@@ -162,8 +175,9 @@ static void consume_frame(conn_impl *m, const ws_frame_header *h, u8 *pl) {
         ws_mask(pl, (size_t) h->payload_len, h->mask_key);
     if (is_control(h->opcode))
         accept_control(m, h, pl);
-    else
+    else if (m->state == WS_ST_OPEN)
         accept_data(m, h, pl);
+    // else S-04: a CLOSE was already received; further data is discarded (§5.5.1).
 }
 
 // Phase 1: accumulate header bytes until parseable. Advances *off.
@@ -261,6 +275,8 @@ size_t ws_send_pong(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap)
     return build_frame(c, WS_OP_PONG, data, len, out, cap);
 }
 size_t ws_send_close(ws_conn *c, u16 code, u8 *out, size_t cap) {
+    if (reserved_close_code(code))
+        code = 1000; // M-06: never emit 1005/1006/1015 on the wire
     u8 payload[2] = {(u8) (code >> 8), (u8) (code & 0xFF)};
     impl(c)->state = WS_ST_CLOSING;
     return build_frame(c, WS_OP_CLOSE, payload, 2, out, cap);
