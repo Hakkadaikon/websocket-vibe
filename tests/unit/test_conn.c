@@ -1,0 +1,170 @@
+// Behavioral spec for the sans-IO connection: framing, fragmentation,
+// control-frame interleaving, masking rules, and protocol-violation detection
+// (RFC6455 §5.4-5.6, §6). White-box include of the impl.
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "../../src/core/frame.c"
+#include "../../src/core/mask.c"
+#include "../../src/core/utf8.c"
+#include "../../src/platform/mem.c"
+#include "../../src/sdk/conn.c"
+
+// Build a client->server frame (masked) into buf. Returns total length.
+static size_t mk_frame(u8 *buf, bool fin, u8 opcode, const u8 *payload, size_t plen) {
+    u8     key[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    size_t n      = ws_frame_build_header(buf, 14, fin, opcode, true, key, plen);
+    for (size_t i = 0; i < plen; i++)
+        buf[n + i] = payload[i];
+    ws_mask(buf + n, plen, key);
+    return n + plen;
+}
+
+static ws_conn  C;
+static u8       MSG[WS_MAX_MESSAGE];
+
+static void reset(void) {
+    assert(ws_conn_init(&C, WS_ROLE_SERVER, MSG, sizeof MSG));
+}
+
+static void feed_all(const u8 *buf, size_t len) {
+    size_t off = 0;
+    while (off < len)
+        off += ws_conn_recv(&C, buf + off, len - off);
+}
+
+static void test_single_text(void) {
+    reset();
+    u8     f[64];
+    size_t n = mk_frame(f, true, WS_OP_TEXT, (const u8 *) "hello", 5);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_MESSAGE);
+    assert(ev.opcode == WS_OP_TEXT && ev.len == 5 && memcmp(ev.data, "hello", 5) == 0);
+    assert(ws_conn_poll(&C, &ev) == WS_EV_NONE);
+}
+
+static void test_fragmented(void) {
+    reset();
+    u8     f[64];
+    size_t n = mk_frame(f, false, WS_OP_TEXT, (const u8 *) "Hel", 3);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_NONE); // not complete yet
+    n = mk_frame(f, true, WS_OP_CONTINUATION, (const u8 *) "lo", 2);
+    feed_all(f, n);
+    assert(ws_conn_poll(&C, &ev) == WS_EV_MESSAGE);
+    assert(ev.len == 5 && memcmp(ev.data, "Hello", 5) == 0);
+}
+
+static void test_control_interleaved(void) {
+    // A ping may arrive between fragments and must be surfaced separately
+    // without corrupting the in-progress message (RFC6455 §5.4).
+    reset();
+    u8     f[64];
+    size_t n = mk_frame(f, false, WS_OP_TEXT, (const u8 *) "ab", 2);
+    feed_all(f, n);
+    n = mk_frame(f, true, WS_OP_PING, (const u8 *) "pi", 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_PING);
+    assert(ev.len == 2 && memcmp(ev.data, "pi", 2) == 0);
+    n = mk_frame(f, true, WS_OP_CONTINUATION, (const u8 *) "cd", 2);
+    feed_all(f, n);
+    assert(ws_conn_poll(&C, &ev) == WS_EV_MESSAGE);
+    assert(ev.len == 4 && memcmp(ev.data, "abcd", 4) == 0);
+}
+
+static void test_reject_unmasked_client_frame(void) {
+    // Server MUST reject an unmasked frame from the client (RFC6455 §5.1).
+    reset();
+    u8     f[16];
+    size_t n = ws_frame_build_header(f, 16, true, WS_OP_TEXT, false, NULL, 1);
+    f[n]     = 'x';
+    feed_all(f, n + 1);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_ERROR);
+}
+
+static void test_reject_fragmented_control(void) {
+    // Control frames MUST NOT be fragmented (RFC6455 §5.5).
+    reset();
+    u8     f[16];
+    size_t n = mk_frame(f, false, WS_OP_PING, (const u8 *) "x", 1);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_ERROR);
+}
+
+static void test_reject_oversize_control(void) {
+    // Control frame payload > 125 is illegal (RFC6455 §5.5).
+    reset();
+    u8 big[126];
+    memset(big, 'z', sizeof big);
+    u8     f[140];
+    size_t n = mk_frame(f, true, WS_OP_PING, big, 126);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_ERROR);
+}
+
+static void test_reject_bad_utf8_text(void) {
+    // Text frame with ill-formed UTF-8 is a protocol error (RFC6455 §8.1).
+    reset();
+    u8     bad[] = {0xC0, 0x80}; // overlong
+    u8     f[16];
+    size_t n = mk_frame(f, true, WS_OP_TEXT, bad, 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_ERROR);
+}
+
+static void test_close_handshake(void) {
+    reset();
+    u8     payload[2] = {0x03, 0xE8}; // code 1000
+    u8     f[16];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, payload, 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ev.close_code == 1000);
+    assert(ws_conn_status(&C) == WS_ST_CLOSING || ws_conn_status(&C) == WS_ST_CLOSED);
+}
+
+static void test_send_message_unmasked_server(void) {
+    reset();
+    u8     out[64];
+    size_t n = ws_send_message(&C, WS_OP_BINARY, (const u8 *) "hi", 2, out, sizeof out);
+    assert(n == 4);              // 2 header + 2 payload, unmasked
+    assert((out[1] & 0x80) == 0); // server frames not masked
+    assert(out[0] == (0x80 | WS_OP_BINARY));
+    assert(out[2] == 'h' && out[3] == 'i');
+}
+
+static void test_split_across_recv(void) {
+    // Header and payload arriving in separate recv calls must aggregate.
+    reset();
+    u8     f[64];
+    size_t n = mk_frame(f, true, WS_OP_TEXT, (const u8 *) "split", 5);
+    for (size_t k = 0; k < n; k++)
+        ws_conn_recv(&C, f + k, 1); // one byte at a time
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_MESSAGE);
+    assert(ev.len == 5 && memcmp(ev.data, "split", 5) == 0);
+}
+
+int main(void) {
+    test_single_text();
+    test_fragmented();
+    test_control_interleaved();
+    test_reject_unmasked_client_frame();
+    test_reject_fragmented_control();
+    test_reject_oversize_control();
+    test_reject_bad_utf8_text();
+    test_close_handshake();
+    test_send_message_unmasked_server();
+    test_split_across_recv();
+    printf("test_conn: all passed\n");
+    return 0;
+}
