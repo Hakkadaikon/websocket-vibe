@@ -174,12 +174,31 @@ static void test_pong_echoes_ping_payload(void) {
 }
 
 static void test_no_data_after_close_sent(void) {
-    // S-03: after ws_send_close, the connection is no longer OPEN, so the
-    // outbound data path is closed (maySendData = false).
+    // S-03: after ws_send_close, the connection is no longer OPEN and data
+    // frames are refused (ws_send_message returns 0).
     reset();
-    u8 out[16];
+    u8 out[64];
     ws_send_close(&C, 1000, out, sizeof out);
     assert(ws_conn_status(&C) != WS_ST_OPEN);
+    assert(ws_send_message(&C, WS_OP_TEXT, (const u8 *) "x", 1, out, sizeof out) == 0);
+}
+
+static void test_close_handshake_roundtrip(void) {
+    // S-05: peer closes first (-> CLOSING); our reply completes the handshake
+    // (-> CLOSED) and a second ws_send_close is a no-op (sent at most once).
+    reset();
+    u8 f[16];
+    u8 body[2] = {0x03, 0xE8}; // 1000
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, body, 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ws_conn_status(&C) == WS_ST_CLOSING); // peer closed, we have not replied
+    u8 out[16];
+    size_t r = ws_send_close(&C, ev.close_code, out, sizeof out);
+    assert(r == 4);
+    assert(ws_conn_status(&C) == WS_ST_CLOSED);            // handshake complete
+    assert(ws_send_close(&C, 1000, out, sizeof out) == 0); // idempotent
 }
 
 static void test_data_discarded_after_close_recv(void) {
@@ -278,6 +297,7 @@ int main(void) {
     test_unsolicited_pong();
     test_pong_echoes_ping_payload();
     test_no_data_after_close_sent();
+    test_close_handshake_roundtrip();
     test_data_discarded_after_close_recv();
     test_client_mask_key_random();
     test_recv_invalid_close_code();
