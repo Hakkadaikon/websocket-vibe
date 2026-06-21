@@ -11,6 +11,23 @@ void *ws_memcpy(void *dst, const void *src, size_t n) {
     return dst;
 }
 
+// 末尾から前方へコピー (dst > src の後方オーバーラップを安全に扱う)。
+static void copy_backward(u8 *d, const u8 *s, size_t n) {
+    for (size_t i = n; i-- > 0;)
+        d[i] = s[i];
+}
+
+// dst <= src なら昇順 (ws_memcpy)、dst > src なら降順でコピーする。
+// 集約バッファ内でペイロードを先頭へ詰め直すときの自己オーバーラップ対策。
+void *ws_memmove(void *dst, const void *src, size_t n) {
+    u8 *d = (u8 *) dst;
+    const u8 *s = (const u8 *) src;
+    if (d <= s)
+        return ws_memcpy(dst, src, n);
+    copy_backward(d, s, n);
+    return dst;
+}
+
 void *ws_memset(void *dst, int c, size_t n) {
     u8 *d = (u8 *) dst;
     for (size_t i = 0; i < n; i++)
