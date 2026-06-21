@@ -105,41 +105,12 @@ def serverFrame (op : Opcode) (payload : List UInt8) (fin : Bool) : Frame :=
 theorem server_frames_unmasked (op : Opcode) (payload : List UInt8) (fin : Bool) :
     (serverFrame op payload fin).masked = false := rfl
 
-/-! ## M-06 / M-07 close code (§7.4.1) -/
+/-! ## M-06 / M-07 close code (§7.4.1)
 
-/-- フレームに出してはならない予約 close code(1005/1006/1015)。 -/
-def isReservedCloseCode (c : UInt16) : Bool :=
-  c = 1005 || c = 1006 || c = 1015
-
-/-- 送信用 close フレームの close code を検証してから採用する。
-    予約コードは 1000(Normal)へ丸める。 -/
-def sanitizeCloseCode (c : UInt16) : UInt16 :=
-  if isReservedCloseCode c then 1000 else c
-
-/-- M-06: sanitize 後の close code は予約コードでない。 -/
-theorem sanitized_close_code_not_reserved (c : UInt16) :
-    isReservedCloseCode (sanitizeCloseCode c) = false := by
-  unfold sanitizeCloseCode
-  by_cases h : isReservedCloseCode c = true
-  · rw [if_pos h]; decide
-  · rw [if_neg h]
-    simpa using h
-
-/-- 受信 close code が妥当か(RFC6455 §7.4.1 の許容範囲)。
-    1000-1003, 1007-1011, 3000-4999 を妥当とする(簡約モデル)。 -/
-def validCloseCode (c : UInt16) : Bool :=
-  (1000 ≤ c && c ≤ 1003) ||
-  (1007 ≤ c && c ≤ 1011) ||
-  (3000 ≤ c && c ≤ 4999)
-
-/-- 不正 close code 受信時に返すべき close code(M-07: 1002 Protocol Error)。 -/
-def closeCodeOnInvalid (received : UInt16) : UInt16 :=
-  if validCloseCode received then received else 1002
-
-/-- M-07: 不正な close code を受けたら 1002 で応答する。 -/
-theorem invalid_close_code_yields_1002 (c : UInt16) (h : validCloseCode c = false) :
-    closeCodeOnInvalid c = 1002 := by
-  simp [closeCodeOnInvalid, h]
+定義と定理は StateMachine.lean へ移動済み(step の close 分岐検証で再利用するため)。
+`validCloseCode`/`closeCodeOnInvalid`/`isReservedCloseCode`/`sanitizeCloseCode` と
+M-06(`sanitized_close_code_not_reserved`)/M-07(`invalid_close_code_yields_1002`)、
+step 接続定理(`step_close_validates`/`step_close_rejects_invalid`)を参照すること。 -/
 
 /-! ## F-10 64bit 拡張長の最上位ビット (§5.2) -/
 
@@ -156,6 +127,55 @@ theorem msb_set_len_rejected (len : UInt64) (h : len.toNat ≥ msbThreshold) :
     extendedLenOk len = false := by
   simp only [extendedLenOk, decide_eq_false_iff_not, Nat.not_lt]
   exact h
+
+/-! ## F-09/F-10 の主たる根拠: 正準デコード判定 `decodeCanonical`
+
+`LengthCodec.decodeCanonical` が C 実装 `src/core/frame.c` の `parse_len`
+(`parse_len16`/`parse_len64`/`check_len64`)の正準モデルである。
+byte-for-byte に対応し、非最小エンコード(F-09)と bit63 立ち(F-10)を `none` で拒否する。
+上の `extendedLenOk`/`msbThreshold` は MSB 判定の意味的核として併存させるが、
+実際の長さデコード判定としての F-09/F-10 の根拠はここの定理に置く。 -/
+
+/-- F-10(主): 127 形式の 8byte 長が bit63 を立てていれば(`≥ 2^63`)正準デコードは拒否する。
+    C `check_len64` の `v & 0x8000…` ガードに対応。 -/
+theorem f10_msb_rejected_by_decode
+    (b7 b6 b5 b4 b3 b2 b1 b0 : UInt8) (rest : List UInt8)
+    (hmsb : LengthCodec.fromBE [b7, b6, b5, b4, b3, b2, b1, b0]
+              ≥ LengthCodec.msbThreshold64) :
+    LengthCodec.decodeCanonical
+        (127 :: b7 :: b6 :: b5 :: b4 :: b3 :: b2 :: b1 :: b0 :: rest) = none :=
+  LengthCodec.decodeCanonical_rejects_msb_64 b7 b6 b5 b4 b3 b2 b1 b0 rest hmsb
+
+/-- F-10(具体): 最小の bit63 立ち長 `0x8000…0000` は拒否される。 -/
+theorem f10_msb_rejected_concrete :
+    LengthCodec.decodeCanonical [127, 0x80, 0, 0, 0, 0, 0, 0, 0] = none :=
+  LengthCodec.decodeCanonical_rejects_msb_concrete
+
+/-- F-09(主, 16bit 形式): 126 形式に 126 未満の値を入れた非最小エンコードは拒否される。
+    C `parse_len16` の `v < WS_LEN7_16BIT` ガードに対応。 -/
+theorem f09_nonminimal16_rejected_by_decode
+    (b1 b0 : UInt8) (rest : List UInt8)
+    (h : LengthCodec.fromBE [b1, b0] < 126) :
+    LengthCodec.decodeCanonical (126 :: b1 :: b0 :: rest) = none :=
+  LengthCodec.decodeCanonical_rejects_nonminimal_16 b1 b0 rest h
+
+/-- F-09(主, 64bit 形式): 127 形式に 65535 以下の値を入れた非最小エンコードは拒否される。
+    C `check_len64` の `v <= WS_LEN16_MAX` ガードに対応。 -/
+theorem f09_nonminimal64_rejected_by_decode
+    (b7 b6 b5 b4 b3 b2 b1 b0 : UInt8) (rest : List UInt8)
+    (hmsb : LengthCodec.fromBE [b7, b6, b5, b4, b3, b2, b1, b0]
+              < LengthCodec.msbThreshold64)
+    (hmin : LengthCodec.fromBE [b7, b6, b5, b4, b3, b2, b1, b0] ≤ 65535) :
+    LengthCodec.decodeCanonical
+        (127 :: b7 :: b6 :: b5 :: b4 :: b3 :: b2 :: b1 :: b0 :: rest) = none :=
+  LengthCodec.decodeCanonical_rejects_nonminimal_64
+    b7 b6 b5 b4 b3 b2 b1 b0 rest hmsb hmin
+
+/-- F-09/F-10(健全性): 正準エンコード(`encode`、常に最小形式)は必ず正準デコードで
+    受理される(`n < 2^63`)。拒否則が正当な値を巻き込まないことの保証。 -/
+theorem f09_canonical_accepted (n : Nat) (rest : List UInt8) (hn : n < 2 ^ 63) :
+    LengthCodec.decodeCanonical (LengthCodec.encode n ++ rest) = some (n, rest) :=
+  LengthCodec.decodeCanonical_encode n rest hn
 
 /-! ## 橋渡し定理(既証の数学性質を仕様要素へ接続)
 
