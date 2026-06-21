@@ -1,69 +1,27 @@
 # websocket-vibe
 
 C23 で書いた RFC6455 WebSocket プロトコルスタック（SDK）である。
-libc に依存しない freestanding 実装で、`-std=c2x -ffreestanding -nostdlib -fno-builtin` でビルドする。
-
-ターゲットは x86-64 Linux である。
-read/write/socket/bind/listen/accept/close/setsockopt/getrandom/epoll_create1/epoll_ctl/epoll_wait/exit などの syscall は inline asm で直接発行し、ランタイムに何も要求しない。
-
-開発は test-first で進める。
+libc に依存しない freestanding 実装で、x86-64 Linux の syscall を inline asm で直接発行し、ランタイムに何も要求しない。
+開発は形式検証ファーストで進める。
 各プロトコル仕様を Lean 4 で証明してから、その証明済みの定義を正準仕様として C 実装を書く。
+I/O は sans-IO コアに閉じ込め、付属のデモサーバが epoll でこれを駆動する。
 
-## アーキテクチャ
+## ディレクトリ構造
 
-レイヤード構成で、各層は下位層だけに依存する。
-
-`src/platform/` は freestanding な土台を提供する。
-メモリ操作（`ws_memcpy` / `ws_memset` / `ws_memcmp`）と、x86-64 Linux syscall のラッパを置く。
-
-`src/core/` は RFC6455 §5 のフレーム処理を担う。
-マスキング（mask.c）、フレームヘッダの codec（frame.c）、UTF-8 検証（utf8.c）からなる。
-
-`src/protocol/` は RFC6455 §4 のハンドシェイクを担う。
-SHA-1（sha1.c）、base64（base64.c）、accept key の計算と HTTP パース（handshake.c）からなる。
-
-`src/sdk/` は公開 API を提供する。
-sans-IO の接続状態機械（conn.c）がフラグメント集約、制御フレーム、close を扱い、freestanding なデモエコーサーバ（server.c）が独自の `_start` からこれを駆動する。
-デモサーバは epoll で readiness を多重化し、固定接続テーブル（最大64接続）で複数クライアントを1スレッドで同時に捌く。
-
-公開ヘッダは `include/ws/` に置く（types.h、frame.h、ws.h）。
-
-## 形式検証
-
-実装の前に、次の3性質を Lean 4 で証明する（`proof/`）。
-いずれも sorry なしで証明済みで、`#print axioms` により sorryAx に依存しないことを確認している。
-証明された定義が C 実装の正準仕様であり、証明した述語はそのまま C ユニットテストのオラクルになる。
-
-- **Masking**（WsProof.Masking）：`out[i] = data[i] XOR key[i % 4]`。XOR involution（2回マスクすると元に戻る）と長さ保存を証明する。client フレームのマスク鍵は getrandom 由来の CSPRNG から毎フレーム取る（RFC6455 §5.3）。
-- **Length codec**（WsProof.LengthCodec）：ペイロード長 encode/decode の roundtrip と単射性（最小形）を証明する。≤125 は1バイト、126 は +2バイトの big-endian、127 は +8バイトの big-endian で表す。
-- **UTF-8**（WsProof.Utf8）：バリデータの健全性と完全性、すなわち受理が RFC3629 の整形式と同値であることを証明する。
-
-## ビルドと品質ゲート
-
-タスクは just で定義する。
-
-- `just build`：freestanding 静的アーカイブ `build/libws.a` とデモサーバ `build/ws_server` をビルドする。
-- `just test`：各層のユニットテストを実行する（ホスト toolchain でコンパイルし、white-box で include する）。
-- `just e2e`：実 TCP で、stdlib のみの Python WS クライアントが freestanding サーバを駆動する（echo、ping、fragment、100KB、close、不正 UTF-8 の拒否、並行接続）。
-- `just cyclo`：lizard で循環的複雑度を計測し、CCN が 10 を超えたら失敗する。
-- `just lint`：clang-format のチェックと clang-tidy を実行する（findings はエラー扱い）。
-- `just bench`：フレーム parse と unmask のローカルスループットを計測する（ns/op、MiB/s）。
-- `just proof`：Lean 4 で形式検証を実行する（`lake build`）。
-- `just ci`：上記をすべて通す統合ゲートである。
-
-開発環境は Nix flake（`flake.nix`）で固定する。
-clang 19、lld、lizard、clang-tools、just、python3 を pin する。
-Lean は dotfiles の toolchain を使う。
-
-## 性能
-
-bench で計測し、改善し、再計測するループを回す。
-マスキングを byte 単位から 64bit ワード単位の XOR に最適化し、大ペイロードで約18倍の改善を得た（約 1.4 GiB/s から約 25 GiB/s）。
-証明済みの XOR involution 仕様は最適化を通じて不変であり、test_mask がこれをガードする。
+```
+src/platform/   freestanding な土台（メモリ操作、x86-64 Linux syscall ラッパ）
+src/core/       RFC6455 §5 のフレーム処理（マスキング、ヘッダ codec、UTF-8 検証）
+src/protocol/   RFC6455 §4 のハンドシェイク（SHA-1、base64、accept key、HTTP パース）
+src/sdk/        公開 API。sans-IO 接続状態機械と freestanding デモエコーサーバ
+include/ws/     公開ヘッダ（types.h、frame.h、ws.h）
+proof/          Lean 4 の形式検証（数学的性質とプロトコル仕様）
+tests/          ユニットテスト（unit/）と Python による E2E テスト（e2e/）
+docs/           開発ガイド（development.md）とセキュリティ（security.md）
+```
 
 ## 使い方
 
-sans-IO コアの典型フローを示す（ws.h）。
+sans-IO コアの典型フローを示す。
 ストレージはすべて呼び出し側が提供し、内部で malloc を使わない。
 
 ```c
@@ -94,5 +52,32 @@ size_t n = ws_send_message(&c, WS_OP_TEXT, payload, payload_len, out, sizeof out
 // n バイトを送信する（n == 0 は失敗）。
 ```
 
-`ws_send_ping` / `ws_send_pong` / `ws_send_close` も同じく出力フレームを `out` に構築し、書き込んだバイト数を返す。
-`ws_send_close` は Close を高々1回だけ送る（冪等）。CLOSING で送れば往復が揃って CLOSED になり、それ以外では CLOSING に入る。close は状態機械の中で完結する。
+`ws_send_ping` / `ws_send_pong` / `ws_send_close` も出力フレームを `out` に構築し、書き込んだバイト数を返す。
+
+## RFC6455 実装状況
+
+| 機能 | 状況 |
+|------|------|
+| §4 Opening Handshake（Upgrade/Key→Accept、SHA-1+base64） | 実装済み（server ロール） |
+| §4 サブプロトコル交渉（Sec-WebSocket-Protocol） | 未実装 |
+| §4 拡張交渉（Sec-WebSocket-Extensions / permessage-deflate） | 未実装 |
+| §5.2 フレーミング（FIN/RSV/opcode/mask、長さ 7/16/64bit） | 実装済み |
+| §5.3 client→server マスキング | 実装済み |
+| §5.4 フラグメント集約 | 実装済み |
+| §5.5 制御フレーム（close/ping/pong） | 実装済み |
+| §5.5.1 closing handshake / close code | 実装済み |
+| §6 データ送受信（text/binary、UTF-8 検証） | 実装済み |
+| §7.4.1 close code の扱い（許容域、1005/1006/1015） | 実装済み |
+| §8 Fail the Connection | 実装済み |
+| client ロールの opening handshake 生成 | 未実装（フレーム送受信は client 可、接続確立は server のみ） |
+| TLS / wss://（§3） | 未実装（平文のみ） |
+| I/O モデル | sans-IO コア + epoll 多重化デモサーバ（最大64同時接続） |
+
+## ドキュメント
+
+ビルド、品質ゲート、形式検証ワークフロー、性能の詳細は [docs/development.md](docs/development.md) を参照する。
+マスク鍵の扱い、入力検証、TLS 未対応の注意などセキュリティ上の設計は [docs/security.md](docs/security.md) を参照する。
+
+## ライセンス
+
+MIT License。詳細は [LICENSE](LICENSE) を参照する。
