@@ -6,6 +6,8 @@
 数学的性質(masking involution, length roundtrip, UTF-8 健全性)は `WsProof.{Masking,LengthCodec,Utf8}` に既証。
 
 全 28 要素を `WsProof.Spec.*` で証明済み(`lake build` 緑・`sorryAx` 非依存)。
+ただし「証明済み」=「定理が緑」であり、一部(M-07, F-09/F-10)は正準モデル `step` から未接続の
+孤立定理で、C 実装の担保は test に依存する。詳細は末尾「C 実装との対応」を参照。
 型 = invariant(単一ステップ不変)/ pre / post / temporal(順序・応答義務・到達可能性)。
 優先 = C(critical)/ I(important)/ N(nice-to-have)。
 
@@ -63,10 +65,30 @@
 ## C 実装との対応(test-first 橋渡し)
 
 証明済みの step 関数/述語を `conn.c` の `consume_frame`/`header_ok`/`accept_data`/`accept_control`
-の分岐に1対1対応させ、`test_conn.c`/`test_frame.c` で固定する。テストが proof と実装の乖離を検出する。
+の分岐に対応させ、`test_conn.c`/`test_frame.c` で固定する。テストが proof と実装の乖離を検出する。
 
-実際に乖離を炙り出して修正した例(test が先に落ち、実装修正で緑化):
+### `step` に接続済み(モデルが C の分岐を直接表現)
+
+`StateMachine.step`(`Spec/StateMachine.lean`)が判定する分岐は、対応する C コードの正準モデルになっている:
+S-01/S-02(状態遷移・吸収)、F-07(RSV 拒否)、F-08(未知 opcode)、C-02/C-03(制御フレーム
+fin/oversize)、M-02(unmasked 拒否)、S-04(CLOSING でデータ破棄)。これらは step を変えれば証明が落ちる。
+
+### `step` に**未接続**の孤立定理(保証範囲に注意)
+
+以下は定理としては既証だが、`step`/`Frame` モデルからは呼ばれていない。よって対応する C コードに
+バグを入れても **Lean の証明は緑のまま**。担保は `test_conn.c`/`test_frame.c` の通常ユニットテストに依存する
+(形式検証ではなく test による担保)。
+
+- **M-07**(受信 close code 検証): `validCloseCode`/`closeCodeOnInvalid`(`Workflow.lean`)は独立定理で、
+  `step` の `.close` 分岐は無検証の `closeCode`(生コード抽出、長さ<2 で 1005)を使う。C の `close_code_from`
+  (`conn.c`)は域外を 1002 に写像するが、この検証は step モデルに無い。固定は `test_recv_invalid_close_code`。
+- **F-09/F-10**(長さデコード検証): 非最小長・64bit MSB 拒否は `frame.c` の `parse_len16`/`check_len64` が実装。
+  Lean の `Frame` 型はパース済みで `payload : List UInt8` を持ち、ワイヤ上の長さエンコードをモデル化しない。
+  F-09/F-10 の定理は `encode_injective`/`extendedLenOk` の純数論補題で、パーサのバグは検出できない。固定は `test_frame.c`。
+
+### 乖離を炙り出して修正した例(test が先に落ち、実装修正で緑化)
+
 - **S-04**: CLOSING でもデータを受理して MESSAGE を出していた → `state==OPEN` のみ `accept_data`。
-- **M-07**: 受信 close code が無検証だった → §7.4.1 の許容域で検証、域外は 1002。
-- **M-06**: `ws_send_close` が予約コードを載せ得た → 1000 へ丸める。
-- **F-09/F-10**: `frame.c` は既に非最小長・64bit MSB を拒否済み(乖離なし)。
+- **M-07**: 受信 close code が無検証だった → §7.4.1 の許容域で検証、域外は 1002(上記の通り step 未接続、test 担保)。
+- **M-06**: `ws_send_close` が予約コードを載せ得た → 1000 へ丸める(送信経路は step 非経由だが M-06 定理と値が対応)。
+- **F-09/F-10**: `frame.c` は既に非最小長・64bit MSB を拒否済み(モデル外、test 担保)。
