@@ -65,7 +65,7 @@ cyclo:
 lint:
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t allsrc < <(find src include tests bench \( -name '*.c' -o -name '*.h' \))
+    mapfile -t allsrc < <(find src include tests bench examples \( -name '*.c' -o -name '*.h' \))
     clang-format --dry-run --Werror "${allsrc[@]}"
     mapfile -t csrc < <(find src -name '*.c')
     # source files BEFORE `--`; compiler flags AFTER.
@@ -74,7 +74,7 @@ lint:
 fmt:
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t allsrc < <(find src include tests bench \( -name '*.c' -o -name '*.h' \))
+    mapfile -t allsrc < <(find src include tests bench examples \( -name '*.c' -o -name '*.h' \))
     clang-format -i "${allsrc[@]}"
 
 # Formal verification (Lean 4 via dotfiles toolchain).
