@@ -113,30 +113,36 @@ static void set_error(conn_impl *m) {
     m->state = WS_ST_CLOSED;
 }
 
-// Append data-frame payload; updates fragmentation state. Sets event when FIN.
-static void accept_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
-    if (!m->in_message) {
-        m->msg_len = 0;
-        m->msg_opcode = h->opcode;
-        m->in_message = true;
-        if (h->opcode == WS_OP_TEXT)
-            ws_memset(&m->utf8, 0, sizeof m->utf8);
-    }
-    if (m->msg_len + h->payload_len > m->msg_cap) {
-        set_error(m);
-        return;
-    }
+// Start a new aggregated message on the first (non-continuation) fragment.
+static void begin_message(conn_impl *m, const ws_frame_header *h) {
+    m->msg_len = 0;
+    m->msg_opcode = h->opcode;
+    m->in_message = true;
+    if (h->opcode == WS_OP_TEXT)
+        ws_memset(&m->utf8, 0, sizeof m->utf8);
+}
+
+// Append one fragment's payload and advance the running UTF-8 check.
+static bool append_payload(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
+    if (m->msg_len + h->payload_len > m->msg_cap)
+        return false;
     ws_memcpy(m->msg + m->msg_len, pl, h->payload_len);
     m->msg_len += h->payload_len;
+    bool is_text = (m->msg_opcode == WS_OP_TEXT);
+    return !is_text || ws_utf8_feed(&m->utf8, pl, h->payload_len);
+}
 
-    if (m->msg_opcode == WS_OP_TEXT && !ws_utf8_feed(&m->utf8, pl, h->payload_len)) {
-        set_error(m);
-        return;
-    }
-    if (!h->fin)
-        return; // wait for more fragments
+// Start the message if needed, then append this fragment's payload.
+static bool stage_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
+    if (!m->in_message)
+        begin_message(m, h);
+    return append_payload(m, h, pl);
+}
 
-    if (m->msg_opcode == WS_OP_TEXT && !ws_utf8_complete(&m->utf8)) {
+// Finalize the aggregated message on FIN; emits MESSAGE or errors on bad UTF-8.
+static void finish_message(conn_impl *m) {
+    bool bad_text = (m->msg_opcode == WS_OP_TEXT) && !ws_utf8_complete(&m->utf8);
+    if (bad_text) {
         set_error(m); // incomplete UTF-8 at message end
         return;
     }
@@ -146,6 +152,16 @@ static void accept_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     m->ev.data = m->msg;
     m->ev.len = m->msg_len;
     m->ev_pending = WS_EV_MESSAGE;
+}
+
+// Append data-frame payload; updates fragmentation state. Sets event when FIN.
+static void accept_data(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
+    if (!stage_data(m, h, pl)) {
+        set_error(m);
+        return;
+    }
+    if (h->fin)
+        finish_message(m);
 }
 
 static bool in_range(u16 c, u16 lo, u16 hi) {
@@ -162,26 +178,46 @@ static bool reserved_close_code(u16 c) {
     return c == 1005 || c == 1006 || c == 1015;
 }
 
-// Control frames carry their own (un-aggregated) payload via the staging area.
-static void accept_control(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
-    if (h->opcode == WS_OP_CLOSE) {
-        u16 code = 1005; // "no status" default when no body is present
-        if (h->payload_len >= 2) {
-            code = (u16) ((pl[0] << 8) | pl[1]);
-            if (!valid_close_code(code))
-                code = 1002; // M-07: out-of-range code -> Protocol Error
-        }
-        m->ev.type = WS_EV_CLOSE;
-        m->ev.close_code = code;
-        m->ev_pending = WS_EV_CLOSE;
-        m->state = (m->state == WS_ST_OPEN) ? WS_ST_CLOSING : WS_ST_CLOSED;
-        return;
-    }
+// Decode the close code from a CLOSE body (§7.4.1), mapping bad codes to 1002.
+static u16 close_code_from(const ws_frame_header *h, const u8 *pl) {
+    if (h->payload_len < 2)
+        return 1005; // "no status" default when no body is present
+    u16 code = (u16) ((pl[0] << 8) | pl[1]);
+    return valid_close_code(code) ? code : 1002; // M-07: out-of-range -> Protocol Error
+}
+
+// Handle an inbound CLOSE: emit CLOSE event and advance the handshake state.
+static void accept_close(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
+    m->ev.type = WS_EV_CLOSE;
+    m->ev.close_code = close_code_from(h, pl);
+    m->ev_pending = WS_EV_CLOSE;
+    m->state = (m->state == WS_ST_OPEN) ? WS_ST_CLOSING : WS_ST_CLOSED;
+}
+
+// Handle an inbound PING/PONG: surface its (un-aggregated) payload.
+static void accept_ping_pong(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     m->ev.type = (h->opcode == WS_OP_PING) ? WS_EV_PING : WS_EV_PONG;
     m->ev.opcode = h->opcode;
     m->ev.data = pl;
     m->ev.len = (size_t) h->payload_len;
     m->ev_pending = m->ev.type;
+}
+
+// Control frames carry their own (un-aggregated) payload via the staging area.
+static void accept_control(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
+    if (h->opcode == WS_OP_CLOSE)
+        accept_close(m, h, pl);
+    else
+        accept_ping_pong(m, h, pl);
+}
+
+// Route a validated, unmasked frame to the control or data handler.
+static void dispatch_frame(conn_impl *m, const ws_frame_header *h, u8 *pl) {
+    if (is_control(h->opcode))
+        accept_control(m, h, pl);
+    else if (m->state == WS_ST_OPEN)
+        accept_data(m, h, pl);
+    // else S-04: a CLOSE was already received; further data is discarded (§5.5.1).
 }
 
 // Process one fully-staged frame (header in rxhdr, payload `pl`).
@@ -192,71 +228,98 @@ static void consume_frame(conn_impl *m, const ws_frame_header *h, u8 *pl) {
     }
     if (h->masked)
         ws_mask(pl, (size_t) h->payload_len, h->mask_key);
-    if (is_control(h->opcode))
-        accept_control(m, h, pl);
-    else if (m->state == WS_ST_OPEN)
-        accept_data(m, h, pl);
-    // else S-04: a CLOSE was already received; further data is discarded (§5.5.1).
+    dispatch_frame(m, h, pl);
+}
+
+// More header bytes are available to stage (input remains and room is left).
+static bool header_wants_byte(const conn_impl *m, size_t len, size_t off) {
+    return off < len && m->rxhdr_len < sizeof m->rxhdr;
+}
+
+// Feed buffered bytes one at a time until the header parses (or input runs out).
+static ws_parse_status accumulate_header(conn_impl *m, const u8 *buf, size_t len, size_t *off,
+                                         ws_frame_header *h) {
+    ws_parse_status st = WS_PARSE_NEED_MORE;
+    while (st == WS_PARSE_NEED_MORE && header_wants_byte(m, len, *off)) {
+        m->rxhdr[m->rxhdr_len++] = buf[(*off)++];
+        st = ws_frame_parse_header(m->rxhdr, m->rxhdr_len, h);
+    }
+    return st;
+}
+
+// Latch a parsed header for the payload phase; reject if it would overflow.
+static ws_parse_status begin_payload(conn_impl *m, const ws_frame_header *h) {
+    size_t plen = (size_t) h->payload_len;
+    if (m->msg_len + plen > m->msg_cap)
+        return WS_PARSE_ERROR; // would overflow aggregation buffer
+    m->hdr_done = true;
+    m->rx_payload_got = 0;
+    m->rx_payload_need = plen;
+    return WS_PARSE_OK;
 }
 
 // Phase 1: accumulate header bytes until parseable. Advances *off.
 // Returns OK (header in *h, m->hdr_done set), NEED_MORE, or ERROR.
 static ws_parse_status recv_header(conn_impl *m, const u8 *buf, size_t len, size_t *off,
                                    ws_frame_header *h) {
-    ws_parse_status st = WS_PARSE_NEED_MORE;
-    while (*off < len && m->rxhdr_len < sizeof m->rxhdr) {
-        m->rxhdr[m->rxhdr_len++] = buf[(*off)++];
-        st = ws_frame_parse_header(m->rxhdr, m->rxhdr_len, h);
-        if (st != WS_PARSE_NEED_MORE)
-            break;
-    }
-    if (st == WS_PARSE_OK) {
-        size_t plen = (size_t) h->payload_len;
-        if (m->msg_len + plen > m->msg_cap)
-            return WS_PARSE_ERROR; // would overflow aggregation buffer
-        m->hdr_done = true;
-        m->rx_payload_got = 0;
-        m->rx_payload_need = plen;
-    }
+    ws_parse_status st = accumulate_header(m, buf, len, off, h);
+    if (st == WS_PARSE_OK)
+        return begin_payload(m, h);
     return st;
+}
+
+// Ensure m->hdr_done holds with h populated. Returns the parse status:
+// OK -> header ready, NEED_MORE -> buffered (resume later), ERROR -> set_error.
+static ws_parse_status ensure_header(conn_impl *m, const u8 *buf, size_t len, size_t *off,
+                                     ws_frame_header *h) {
+    if (m->hdr_done) {
+        ws_frame_parse_header(m->rxhdr, m->rxhdr_len, h); // re-derive from staged bytes
+        return WS_PARSE_OK;
+    }
+    ws_parse_status st = recv_header(m, buf, len, off, h);
+    if (st == WS_PARSE_ERROR)
+        set_error(m);
+    return st;
+}
+
+// Phase 2: stage payload at the message-buffer tail (scratch; committed only
+// when accept_data advances msg_len). Persist progress across calls.
+// Returns true once the full payload is staged.
+static bool stage_payload(conn_impl *m, const u8 *buf, size_t len, size_t *off) {
+    u8 *stage = m->msg + m->msg_len;
+    while (m->rx_payload_got < m->rx_payload_need && *off < len)
+        stage[m->rx_payload_got++] = buf[(*off)++];
+    return m->rx_payload_got >= m->rx_payload_need;
+}
+
+// recv is blocked while an event is pending (drain first) or once closed.
+static bool recv_blocked(const conn_impl *m) {
+    return m->ev_pending != WS_EV_NONE || m->state == WS_ST_CLOSED;
 }
 
 // recv: returns bytes consumed from buf this call. Buffers across calls so a
 // frame may be delivered in arbitrarily small chunks.
-size_t ws_conn_recv(ws_conn *c, const u8 *buf, size_t len) {
-    conn_impl *m = impl(c);
-    if (m->ev_pending != WS_EV_NONE || m->state == WS_ST_CLOSED)
-        return 0; // drain the pending event first
-
+// Drive header + payload staging for one frame, consuming from buf. Returns
+// bytes consumed; processes the frame once fully staged (else resumes later).
+static size_t recv_frame(conn_impl *m, const u8 *buf, size_t len) {
     size_t off = 0;
     ws_frame_header h;
-    if (!m->hdr_done) {
-        ws_parse_status st = recv_header(m, buf, len, &off, &h);
-        if (st == WS_PARSE_ERROR) {
-            set_error(m);
-            return off;
-        }
-        if (st != WS_PARSE_OK)
-            return off; // need more header bytes
-    } else {
-        // Re-derive the parsed header from the staged bytes.
-        ws_frame_parse_header(m->rxhdr, m->rxhdr_len, &h);
-    }
-
-    // Phase 2: stage payload at the message-buffer tail (scratch; committed only
-    // when accept_data advances msg_len). Persist progress across calls.
-    u8 *stage = m->msg + m->msg_len;
-    while (m->rx_payload_got < m->rx_payload_need && off < len)
-        stage[m->rx_payload_got++] = buf[off++];
-    if (m->rx_payload_got < m->rx_payload_need)
+    if (ensure_header(m, buf, len, &off, &h) != WS_PARSE_OK)
+        return off; // need more header bytes (or error already set)
+    if (!stage_payload(m, buf, len, &off))
         return off; // payload incomplete; resume next call
 
     // Full frame staged.
     m->rxhdr_len = 0;
     m->hdr_done = false;
     m->rx_payload_got = 0;
-    consume_frame(m, &h, stage);
+    consume_frame(m, &h, m->msg + m->msg_len);
     return off;
+}
+
+size_t ws_conn_recv(ws_conn *c, const u8 *buf, size_t len) {
+    conn_impl *m = impl(c);
+    return recv_blocked(m) ? 0 : recv_frame(m, buf, len);
 }
 
 ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev) {
@@ -271,23 +334,41 @@ ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev) {
 
 // --- outbound ---
 
-static size_t build_frame(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap) {
-    conn_impl *m = impl(c);
-    bool masked = (m->role == WS_ROLE_CLIENT);
-    u8 key[4];
-    if (masked) {
-        // RFC6455 §5.3: each masking key MUST be fresh and from a strong RNG.
-        // Refuse to send rather than emit a predictable key.
-        if (sys_getrandom(key, sizeof key) != (i64) sizeof key)
-            return 0;
-    }
-    size_t hn = ws_frame_build_header(out, cap, true, opcode, masked, masked ? key : NULL, len);
-    if (hn == 0 || hn + len > cap)
+// Resolve the masking key to hand the header builder. For a client, fill a
+// fresh key (RFC6455 §5.3) and return it via *kp; for unmasked frames *kp=NULL.
+// Returns false on RNG failure so the caller refuses to send (no weak key).
+static bool resolve_mask_key(bool masked, u8 key[4], const u8 **kp) {
+    *kp = NULL;
+    if (!masked)
+        return true;
+    *kp = key;
+    return sys_getrandom(key, 4) == (i64) 4;
+}
+
+// A header length of 0 (build failure) or one that overflows `cap` is unusable.
+static bool frame_fits(size_t hn, size_t len, size_t cap) {
+    return hn != 0 && hn + len <= cap;
+}
+
+// Append `len` payload bytes after an `hn`-byte header, masking if requested.
+static size_t finish_frame(u8 *out, size_t cap, size_t hn, const u8 *data, size_t len, bool masked,
+                           const u8 key[4]) {
+    if (!frame_fits(hn, len, cap))
         return 0;
     ws_memcpy(out + hn, data, len);
     if (masked)
         ws_mask(out + hn, len, key);
     return hn + len;
+}
+
+static size_t build_frame(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap) {
+    bool masked = (impl(c)->role == WS_ROLE_CLIENT);
+    u8 key[4];
+    const u8 *kp;
+    if (!resolve_mask_key(masked, key, &kp))
+        return 0; // RNG failure: refuse rather than emit a predictable key
+    size_t hn = ws_frame_build_header(out, cap, true, opcode, masked, kp, len);
+    return finish_frame(out, cap, hn, data, len, masked, key);
 }
 
 size_t ws_send_message(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap) {
@@ -302,20 +383,28 @@ size_t ws_send_ping(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap)
 size_t ws_send_pong(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap) {
     return build_frame(c, WS_OP_PONG, data, len, out, cap);
 }
+// Record that our Close went out and advance the close handshake state.
+// If the peer already closed (we were in CLOSING), the handshake is now
+// complete -> CLOSED. Otherwise we initiate the close -> CLOSING.
+static void mark_close_sent(conn_impl *m) {
+    m->close_sent = true;
+    m->state = (m->state == WS_ST_CLOSING) ? WS_ST_CLOSED : WS_ST_CLOSING;
+}
+
+// M-06: never emit a reserved status (1005/1006/1015) on the wire.
+static u16 sanitize_close_code(u16 code) {
+    return reserved_close_code(code) ? 1000 : code;
+}
+
 size_t ws_send_close(ws_conn *c, u16 code, u8 *out, size_t cap) {
     conn_impl *m = impl(c);
     // S-05: send Close at most once. If we already replied/initiated, do nothing.
     if (m->close_sent)
         return 0;
-    if (reserved_close_code(code))
-        code = 1000; // M-06: never emit 1005/1006/1015 on the wire
+    code = sanitize_close_code(code);
     u8 payload[2] = {(u8) (code >> 8), (u8) (code & 0xFF)};
     size_t n = build_frame(c, WS_OP_CLOSE, payload, 2, out, cap);
-    if (n == 0)
-        return 0;
-    m->close_sent = true;
-    // If the peer already closed (we were in CLOSING), the handshake is now
-    // complete -> CLOSED. Otherwise we initiate the close -> CLOSING.
-    m->state = (m->state == WS_ST_CLOSING) ? WS_ST_CLOSED : WS_ST_CLOSING;
+    if (n != 0)
+        mark_close_sent(m);
     return n;
 }
