@@ -142,6 +142,95 @@ static void test_send_message_unmasked_server(void) {
     assert(out[2] == 'h' && out[3] == 'i');
 }
 
+// --- bridge tests for the proven Spec.Workflow theorems ---
+
+static void test_unsolicited_pong(void) {
+    // C-06: an unsolicited pong is accepted; state unchanged, surfaced as PONG.
+    reset();
+    u8 f[64];
+    size_t n = mk_frame(f, true, WS_OP_PONG, (const u8 *) "po", 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_PONG);
+    assert(ev.len == 2 && memcmp(ev.data, "po", 2) == 0);
+    assert(ws_conn_status(&C) == WS_ST_OPEN); // state preserved
+}
+
+static void test_pong_echoes_ping_payload(void) {
+    // C-05: ping payload, fed back into ws_send_pong, yields a pong whose
+    // payload matches the ping (pongFor / pong_echoes_ping_payload).
+    reset();
+    u8 f[64];
+    size_t n = mk_frame(f, true, WS_OP_PING, (const u8 *) "data", 4);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_PING && ev.len == 4);
+    u8 out[64];
+    size_t m = ws_send_pong(&C, ev.data, ev.len, out, sizeof out);
+    // server pong: 2-byte header + 4 payload, unmasked, payload echoes ping.
+    assert(m == 6 && (out[1] & 0x80) == 0);
+    assert(memcmp(out + 2, "data", 4) == 0);
+}
+
+static void test_no_data_after_close_sent(void) {
+    // S-03: after ws_send_close, the connection is no longer OPEN, so the
+    // outbound data path is closed (maySendData = false).
+    reset();
+    u8 out[16];
+    ws_send_close(&C, 1000, out, sizeof out);
+    assert(ws_conn_status(&C) != WS_ST_OPEN);
+}
+
+static void test_data_discarded_after_close_recv(void) {
+    // S-04: once a CLOSE is received (state CLOSING), a following data frame is
+    // discarded — no MESSAGE event is produced.
+    reset();
+    u8 f[64];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, (const u8 *) "\x03\xE8", 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ws_conn_status(&C) == WS_ST_CLOSING);
+    // Now a text frame arrives: it must NOT surface as a message.
+    n = mk_frame(f, true, WS_OP_TEXT, (const u8 *) "late", 4);
+    feed_all(f, n);
+    assert(ws_conn_poll(&C, &ev) == WS_EV_NONE); // discarded
+}
+
+static void test_recv_invalid_close_code(void) {
+    // M-07: receiving an out-of-range close code surfaces 1002 (Protocol Error).
+    reset();
+    u8 f[16];
+    u8 bad[2] = {0x03, 0xED}; // 1005 — reserved, MUST NOT appear on the wire
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, bad, 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ev.close_code == 1002);
+}
+
+static void test_recv_valid_close_code(void) {
+    // M-07: a valid close code passes through unchanged.
+    reset();
+    u8 f[16];
+    u8 ok[2] = {0x03, 0xE8}; // 1000 — valid
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, ok, 2);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ev.close_code == 1000);
+}
+
+static void test_send_close_sanitizes_code(void) {
+    // M-06: a reserved code (1006) must never be emitted; it is folded to 1000.
+    reset();
+    u8 out[16];
+    size_t n = ws_send_close(&C, 1006, out, sizeof out);
+    assert(n == 4); // 2 header + 2 payload
+    u16 emitted = (u16) ((out[2] << 8) | out[3]);
+    assert(emitted == 1000);
+}
+
 static void test_split_across_recv(void) {
     // Header and payload arriving in separate recv calls must aggregate.
     reset();
@@ -164,6 +253,13 @@ int main(void) {
     test_reject_bad_utf8_text();
     test_close_handshake();
     test_send_message_unmasked_server();
+    test_unsolicited_pong();
+    test_pong_echoes_ping_payload();
+    test_no_data_after_close_sent();
+    test_data_discarded_after_close_recv();
+    test_recv_invalid_close_code();
+    test_recv_valid_close_code();
+    test_send_close_sanitizes_code();
     test_split_across_recv();
     printf("test_conn: all passed\n");
     return 0;
