@@ -6,6 +6,7 @@
 
 - `just build`：freestanding 静的アーカイブ `build/libws.a` とデモサーバ `build/ws_server` をビルドする。
 - `just test`：各層のユニットテストを実行する（ホスト toolchain でコンパイルし、white-box で include する）。
+- `just sanitize`：ユニットテストを ASan / UBSan / LeakSanitizer 付きで再実行する。テストが sans-IO コアを white-box で include するため、`ws_memcpy`／`ws_memmove` と状態機械の範囲外アクセス・未定義動作・リークを検出する。freestanding バイナリにはサニタイザランタイムをリンクできないため、コアの検査はこのホスト経路で行う。
 - `just e2e`：実 TCP で、stdlib のみの Python WS クライアントが freestanding サーバを駆動する（echo、ping、fragment、100KB、close、不正 UTF-8 の拒否、並行接続）。
 - `just cyclo`：lizard で循環的複雑度を計測し、CCN が 3 を超えたら失敗する。
 - `just verify-freestanding`：デモサーバが libc にリンクしていないことを検証する（動的ローダ要求・共有ライブラリ依存・未定義シンボルがないこと）。

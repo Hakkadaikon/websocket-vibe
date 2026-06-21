@@ -14,8 +14,8 @@ C23 / freestanding(libc 非依存)の RFC6455 WebSocket プロトコルスタッ
 
 ## ビルドと検証
 
-- `just ci` が統合ゲート(proof / lint / cyclo / build / verify-freestanding / test / e2e / bench)。提出は ci 緑が条件。
-- 個別: `just proof`(Lean)、`just test`(unit)、`just e2e`(実 TCP)、`just lint`(clang-format + clang-tidy、findings はエラー)、`just verify-freestanding`(libc 非リンク検査)。
+- `just ci` が統合ゲート(proof / lint / cyclo / build / verify-freestanding / test / sanitize / e2e / bench)。提出は ci 緑が条件。
+- 個別: `just proof`(Lean)、`just test`(unit)、`just sanitize`(ASan/UBSan/LSan で unit を再実行。コアをホワイトボックス include するのでメモリ安全・UB・リークを検出)、`just e2e`(実 TCP)、`just lint`(clang-format + clang-tidy、findings はエラー)、`just verify-freestanding`(libc 非リンク検査)。
 - 一時ファイルは `$TMPDIR`(`/tmp` は書込不可な環境がある)。
 
 ## 詳細
