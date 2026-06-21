@@ -12,7 +12,10 @@ src/core/       RFC6455 §5 のフレーム処理（マスキング、ヘッダ 
 src/protocol/   RFC6455 §4 のハンドシェイク（SHA-1、base64、accept key、HTTP パース）
 src/sdk/        公開 API。sans-IO 接続状態機械と freestanding デモエコーサーバ
 include/ws/     公開ヘッダ（types.h、frame.h、ws.h）
+proof/          Lean 4 の形式検証（数学的性質とプロトコル仕様）
+tests/          ユニットテスト（unit/）と Python による E2E テスト（e2e/）
 examples/       SDK の利用サンプル（echo/ はテキストを echo back する）
+docs/           開発ガイド（development.md）とセキュリティ（security.md）
 ```
 
 ## 使い方
