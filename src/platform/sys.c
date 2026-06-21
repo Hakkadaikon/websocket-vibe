@@ -10,6 +10,7 @@
 #define SYS_listen     50
 #define SYS_setsockopt 54
 #define SYS_exit       60
+#define SYS_getrandom  318
 
 static i64 syscall3(i64 n, i64 a, i64 b, i64 c) {
     i64 ret;
@@ -55,6 +56,9 @@ int sys_listen(int fd, int backlog) {
 }
 int sys_accept(int fd, void *addr, u32 *addrlen) {
     return (int) syscall3(SYS_accept, fd, (i64) addr, (i64) addrlen);
+}
+i64 sys_getrandom(void *buf, size_t n) {
+    return syscall3(SYS_getrandom, (i64) buf, (i64) n, 0); // flags=0: block until seeded
 }
 void sys_exit(int code) {
     syscall3(SYS_exit, code, 0, 0);

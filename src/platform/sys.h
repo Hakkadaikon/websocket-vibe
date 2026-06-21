@@ -14,6 +14,9 @@ int sys_setsockopt(int fd, int level, int optname, const void *optval, u32 optle
 int sys_bind(int fd, const void *addr, u32 addrlen);
 int sys_listen(int fd, int backlog);
 int sys_accept(int fd, void *addr, u32 *addrlen);
+// Fill buf with n cryptographically-strong random bytes. Returns bytes written
+// (negative is -errno). Used for client frame masking keys (RFC6455 §5.3).
+i64 sys_getrandom(void *buf, size_t n);
 void sys_exit(int code) __attribute__((noreturn));
 
 // Constants we need (Linux/x86-64).
