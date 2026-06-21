@@ -121,10 +121,8 @@ theorem sanitized_close_code_not_reserved (c : UInt16) :
     isReservedCloseCode (sanitizeCloseCode c) = false := by
   unfold sanitizeCloseCode
   by_cases h : isReservedCloseCode c = true
-  · -- 予約コードは 1000 へ丸める。1000 は予約でない。
-    rw [if_pos h]; decide
-  · -- 予約でない c はそのまま。前提より予約でない。
-    rw [if_neg h]
+  · rw [if_pos h]; decide
+  · rw [if_neg h]
     simpa using h
 
 /-- 受信 close code が妥当か(RFC6455 §7.4.1 の許容範囲)。

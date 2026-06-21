@@ -74,10 +74,8 @@ theorem step_monotone (role : Role) (s : State) (inMsg : Bool) (f : Frame) :
   cases s with
   | closed => simp [step, State.rank]
   | «open» =>
-    -- open(rank 0)からは何に遷移しても rank ≥ 0。
     simp only [State.rank]; exact Nat.zero_le _
   | closing =>
-    -- closing(rank 1)からは closing 維持か closed のみ。全枝 rank ≥ 1。
     have : (step role .closing inMsg f).1 = .closing ∨ (step role .closing inMsg f).1 = .closed := by
       unfold step
       repeat' split
