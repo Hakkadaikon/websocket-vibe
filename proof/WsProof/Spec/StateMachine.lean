@@ -12,6 +12,35 @@ def closeCode (payload : List UInt8) : UInt16 :=
   | hi :: lo :: _ => (hi.toUInt16 <<< 8) ||| lo.toUInt16
   | _ => 1005
 
+/-- 受信 close code が妥当か(RFC6455 §7.4.1 の許容範囲)。
+    1000-1003, 1007-1011, 3000-4999 を妥当とする(簡約モデル)。
+    conn.c の `valid_close_code` に対応。 -/
+def validCloseCode (c : UInt16) : Bool :=
+  (1000 ≤ c && c ≤ 1003) ||
+  (1007 ≤ c && c ≤ 1011) ||
+  (3000 ≤ c && c ≤ 4999)
+
+/-- 不正 close code 受信時に返すべき close code(M-07: 1002 Protocol Error)。
+    妥当ならそのまま、域外なら 1002 に写像する。 -/
+def closeCodeOnInvalid (received : UInt16) : UInt16 :=
+  if validCloseCode received then received else 1002
+
+/-- フレームに出してはならない予約 close code(1005/1006/1015)。 -/
+def isReservedCloseCode (c : UInt16) : Bool :=
+  c = 1005 || c = 1006 || c = 1015
+
+/-- 送信用 close フレームの close code を検証してから採用する。
+    予約コードは 1000(Normal)へ丸める。 -/
+def sanitizeCloseCode (c : UInt16) : UInt16 :=
+  if isReservedCloseCode c then 1000 else c
+
+/-- 受信 close フレームの検証済み close code を計算する。
+    conn.c の `close_code_from` と byte-for-byte 一致させる:
+    長さ < 2 なら 1005(No Status センチネル、検証を通さない)、
+    長さ ≥ 2 なら BE u16 を抽出し、域外を 1002 に写像する。 -/
+def recvCloseCode (payload : List UInt8) : UInt16 :=
+  if payload.length < 2 then 1005 else closeCodeOnInvalid (closeCode payload)
+
 /-- 制御フレームが妥当か(fin=true かつ payload 長 ≤ 125)。 -/
 def controlFrameOk (f : Frame) : Bool :=
   f.fin && (f.payload.length ≤ 125)
@@ -39,8 +68,8 @@ def step (role : Role) (s : State) (inMsg : Bool) (f : Frame) : State × Event :
         if controlFrameOk f = false then (.closed, .error)
         else
           match s with
-          | .open => (.closing, .close (closeCode f.payload))
-          | _     => (.closed, .close (closeCode f.payload))
+          | .open => (.closing, .close (recvCloseCode f.payload))
+          | _     => (.closed, .close (recvCloseCode f.payload))
       | .ping =>
         if controlFrameOk f = false then (.closed, .error)
         else (s, .ping f.payload)
@@ -169,26 +198,77 @@ theorem unknown_opcode_rejected (role : Role) (s : State) (inMsg : Bool) (f : Fr
   | «open» => simp only [step]; rw [if_neg hmask, if_neg hrsv, hop]
   | closing => simp only [step]; rw [if_neg hmask, if_neg hrsv, hop]
 
-/-- S-05 への布石: open + 妥当な close フレーム → closing へ遷移。 -/
+/-- S-05 への布石: open + 妥当な close フレーム → closing へ遷移。
+    出力 close code は検証済み(recvCloseCode)。 -/
 theorem close_from_open (role : Role) (inMsg : Bool) (f : Frame)
     (hmask : ¬(role = .server ∧ f.masked = false))
     (hrsv : ¬(f.rsv1 ∨ f.rsv2 ∨ f.rsv3))
     (hop : f.opcode = .close)
     (hok : controlFrameOk f = true) :
-    step role .open inMsg f = (.closing, .close (closeCode f.payload)) := by
+    step role .open inMsg f = (.closing, .close (recvCloseCode f.payload)) := by
   simp only [step]
   rw [if_neg hmask, if_neg hrsv, hop]
   simp [hok]
 
-/-- closing + 妥当な close フレーム → closed へ遷移。 -/
+/-- closing + 妥当な close フレーム → closed へ遷移。
+    出力 close code は検証済み(recvCloseCode)。 -/
 theorem close_from_closing (role : Role) (inMsg : Bool) (f : Frame)
     (hmask : ¬(role = .server ∧ f.masked = false))
     (hrsv : ¬(f.rsv1 ∨ f.rsv2 ∨ f.rsv3))
     (hop : f.opcode = .close)
     (hok : controlFrameOk f = true) :
-    step role .closing inMsg f = (.closed, .close (closeCode f.payload)) := by
+    step role .closing inMsg f = (.closed, .close (recvCloseCode f.payload)) := by
   simp only [step]
   rw [if_neg hmask, if_neg hrsv, hop]
   simp [hok]
+
+/-! ## M-06 / M-07 close code 検証 (§7.4.1) -/
+
+/-- M-06: sanitize 後の close code は予約コードでない。 -/
+theorem sanitized_close_code_not_reserved (c : UInt16) :
+    isReservedCloseCode (sanitizeCloseCode c) = false := by
+  unfold sanitizeCloseCode
+  by_cases h : isReservedCloseCode c = true
+  · rw [if_pos h]; decide
+  · rw [if_neg h]
+    simpa using h
+
+/-- M-07: 不正な close code を受けたら 1002 で応答する。 -/
+theorem invalid_close_code_yields_1002 (c : UInt16) (h : validCloseCode c = false) :
+    closeCodeOnInvalid c = 1002 := by
+  simp [closeCodeOnInvalid, h]
+
+/-! ## M-07 step 接続定理: 受信 close code 検証を step 経由で述べる。 -/
+
+/-- M-07(step 接続): step が close フレームを受けたとき(closed 以外)、
+    出力 close イベントの code は検証済み recvCloseCode と一致する。 -/
+theorem step_close_validates (role : Role) (s : State) (inMsg : Bool) (f : Frame)
+    (hns : s ≠ .closed)
+    (hmask : ¬(role = .server ∧ f.masked = false))
+    (hrsv : ¬(f.rsv1 ∨ f.rsv2 ∨ f.rsv3))
+    (hop : f.opcode = .close)
+    (hok : controlFrameOk f = true) :
+    (step role s inMsg f).2 = .close (recvCloseCode f.payload) := by
+  cases s with
+  | closed => exact absurd rfl hns
+  | «open» =>
+    simp only [step]; rw [if_neg hmask, if_neg hrsv, hop]; simp [hok]
+  | closing =>
+    simp only [step]; rw [if_neg hmask, if_neg hrsv, hop]; simp [hok]
+
+/-- M-07(域外排除): 長さ ≥ 2 の close payload に対し、抽出した code が域外なら
+    step が出力する close code は必ず 1002 になる。域外コードは決して素通りしない。 -/
+theorem step_close_rejects_invalid (payload : List UInt8)
+    (h : payload.length ≥ 2)
+    (hbad : validCloseCode (closeCode payload) = false) :
+    recvCloseCode payload = 1002 := by
+  unfold recvCloseCode
+  rw [if_neg (by omega)]
+  exact invalid_close_code_yields_1002 _ hbad
+
+/-- recvCloseCode は長さ < 2 のとき 1005(No Status センチネル)。conn.c と一致。 -/
+theorem recv_close_code_no_status (payload : List UInt8) (h : payload.length < 2) :
+    recvCloseCode payload = 1005 := by
+  unfold recvCloseCode; rw [if_pos h]
 
 end WsProof.Spec
