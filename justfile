@@ -4,6 +4,10 @@
 cc := env_var_or_default("CC", "clang")
 cflags := "-std=c2x -ffreestanding -nostdlib -fno-builtin -Wall -Wextra -Werror -Wpedantic -O2 -g -Iinclude -Isrc"
 testflags := "-std=c2x -Wall -Wextra -Werror -Iinclude -Isrc"   # tests link host libc for assert/printf
+# Sanitizers run on the libc-hosted test/example harness. The freestanding
+# core is reached white-box via the unit tests, which #include the .c under
+# test — so ASan/UBSan cover ws_memcpy and the whole sans-IO state machine.
+sanflags := "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
 build_dir := "build"
 
 default: build
@@ -76,6 +80,25 @@ bench: _mkdir
     {{cc}} {{testflags}} -O3 -DNDEBUG bench/bench_frame.c -o {{build_dir}}/bench_frame
     {{build_dir}}/bench_frame
 
+# Memory safety + leak check: run the unit tests under ASan/LSan/UBSan.
+# The unit tests white-box-include the sans-IO core, so this exercises
+# ws_memcpy/ws_memmove and the full state machine for out-of-bounds,
+# overlap misuse, UB, and leaks (LeakSanitizer ships inside ASan).
+sanitize: _mkdir
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fail=0
+    for t in tests/unit/test_*.c; do
+      bin="{{build_dir}}/san_$(basename "$t" .c)"
+      {{cc}} {{testflags}} {{sanflags}} "$t" -o "$bin"
+      if ASAN_OPTIONS=detect_leaks=1 "$bin" >/dev/null; then
+        echo "PASS $(basename "$t")"
+      else
+        echo "FAIL $(basename "$t")"; fail=1
+      fi
+    done
+    exit $fail
+
 # Cyclomatic complexity gate (fail if CCN > 3).
 cyclo:
     lizard src -C 3 -w
@@ -101,5 +124,5 @@ proof:
     cd proof && lake build
 
 # Full CI gate.
-ci: proof lint cyclo build verify-freestanding test e2e bench
+ci: proof lint cyclo build verify-freestanding test sanitize e2e bench
     @echo "CI OK"
