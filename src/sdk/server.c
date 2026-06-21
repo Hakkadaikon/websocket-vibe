@@ -1,6 +1,6 @@
-// ws — minimal freestanding echo server demonstrating the SDK end to end.
-// No libc: own _start, syscalls only. epoll-multiplexed: many clients at once.
-// Echoes data messages, replies to ping with pong, completes the close handshake.
+// ws — SDK を端から端まで示す最小のフリースタンディング echo サーバ。
+// libc に依存しない: 独自 _start、syscall のみ。epoll で多重化し多数の同時接続を扱う。
+// データメッセージをエコーし、ping には pong を返し、クローズハンドシェイクを完了する。
 #include "ws/ws.h"
 
 #include "platform/sys.h"
@@ -14,16 +14,16 @@
 #define PORT     9001
 #define MAX_CONN 64
 #define RXBUF    (1u << 16)
-// Demo aggregation cap per connection. Smaller than the SDK's 1 MiB default so
-// MAX_CONN slots stay ~8 MiB of .bss, not ~64 MiB (still fits the E2E payloads).
+// 接続ごとのデモ用集約上限。SDK の既定 1 MiB より小さくし、MAX_CONN 個のスロットの
+// .bss を ~64 MiB ではなく ~8 MiB に抑える (E2E のペイロードには十分収まる)。
 #define MSGBUF (128u << 10)
 #define TXBUF  (MSGBUF + 16)
-#define HSBUF  2048 // upgrade request staging
+#define HSBUF  2048 // アップグレードリクエストのステージング領域
 
-// Per-connection state. The aggregation buffer must be per-connection so
-// interleaved clients do not clobber each other's in-progress messages.
+// 接続ごとの状態。集約バッファは接続ごとに持つ必要がある。さもないと、
+// 交互に処理されるクライアントが互いの処理中メッセージを破壊してしまう。
 typedef struct {
-    int fd; // -1 = slot free
+    int fd; // -1 はスロット空き
     bool hs_done;
     size_t hs_len;
     u8 hs[HSBUF];
@@ -32,7 +32,7 @@ typedef struct {
 } client;
 
 static client g_clients[MAX_CONN];
-static u8 g_rx[RXBUF]; // shared scratch: one connection processed at a time
+static u8 g_rx[RXBUF]; // 共有の一時領域: 一度に 1 接続ずつ処理する
 static u8 g_tx[TXBUF];
 
 static client *slot_alloc(int fd) {
@@ -44,7 +44,7 @@ static client *slot_alloc(int fd) {
             return c;
         }
     }
-    return NULL; // table full
+    return NULL; // テーブル満杯
 }
 
 static client *slot_find(int fd) {
@@ -69,8 +69,8 @@ static bool hs_complete(const client *c) {
     return c->hs_len >= 4 && ws_memcmp(c->hs + c->hs_len - 4, "\r\n\r\n", 4) == 0;
 }
 
-// Build and send the 101 response for the staged request. Returns true on
-// success; sets *fail on a malformed request or a failed write.
+// ステージ済みリクエストに対する 101 レスポンスを組み立てて送る。成功で true を返す。
+// リクエストが不正、または書き込み失敗のとき *fail を立てる。
 static bool hs_respond(client *c, bool *fail) {
     const char *key;
     size_t klen = ws_handshake_find_key((const char *) c->hs, c->hs_len, &key);
@@ -86,13 +86,13 @@ static bool hs_respond(client *c, bool *fail) {
     return !*fail;
 }
 
-// Try to complete the HTTP upgrade once \r\n\r\n is staged. Returns true when
-// the 101 response has been sent (hs_done set), false if still incomplete, and
-// sets *fail on a malformed request.
+// \r\n\r\n がステージされたら HTTP アップグレードの完了を試みる。101 レスポンスを
+// 送信できたら true (hs_done を設定)、まだ不完全なら false を返し、リクエストが
+// 不正なら *fail を立てる。
 static bool try_handshake(client *c, bool *fail) {
     *fail = false;
     if (!hs_complete(c))
-        return false; // need more header bytes
+        return false; // ヘッダバイトがまだ足りない
     if (!hs_respond(c, fail))
         return false;
     c->hs_done = true;
@@ -100,20 +100,20 @@ static bool try_handshake(client *c, bool *fail) {
     return true;
 }
 
-// Send n staged bytes (if any) and keep the connection open.
+// ステージした n バイト (あれば) を送り、接続は開いたままにする。
 static bool reply_open(client *c, size_t n) {
     return n && write_all(c->fd, g_tx, n);
 }
 
-// Send n staged bytes (if any) and close the connection.
+// ステージした n バイト (あれば) を送り、接続を閉じる。
 static bool reply_close(client *c, size_t n) {
     if (n)
         write_all(c->fd, g_tx, n);
     return false;
 }
 
-// Data-bearing events (message/ping): echo or pong, keep open. *handled tells
-// whether ev->type was one of these.
+// データを伴うイベント (message/ping): エコーまたは pong を返し、接続を保つ。
+// *handled は ev->type がこれらのいずれかだったかを示す。
 static bool handle_data_event(client *c, const ws_event *ev, bool *handled) {
     *handled = true;
     if (ev->type == WS_EV_MESSAGE)
@@ -124,12 +124,12 @@ static bool handle_data_event(client *c, const ws_event *ev, bool *handled) {
     return true;
 }
 
-// Echo the peer's close code, mapping the "no code present" sentinel to 1000.
+// 相手のクローズコードをそのまま返す。「コードなし」のセンチネルは 1000 に写像する。
 static u16 echo_close_code(u16 code) {
     return code == 1005 ? 1000 : code;
 }
 
-// Terminating events (close/error): send the matching close, then close.
+// 終了系イベント (close/error): 対応する close を送ってから接続を閉じる。
 static bool handle_close_event(client *c, const ws_event *ev) {
     if (ev->type == WS_EV_ERROR)
         return reply_close(c, ws_send_close(&c->conn, 1002, g_tx, TXBUF));
@@ -139,15 +139,15 @@ static bool handle_close_event(client *c, const ws_event *ev) {
     return true;
 }
 
-// Dispatch one drained event; returns false to terminate the connection.
+// ドレインした 1 イベントを処理する。接続を終了させるなら false を返す。
 static bool handle_event(client *c, const ws_event *ev) {
     bool handled;
     bool keep = handle_data_event(c, ev, &handled);
     return handled ? keep : handle_close_event(c, ev);
 }
 
-// Drain and dispatch all events currently buffered in the connection;
-// returns false to close.
+// 接続に現在溜まっている全イベントをドレインして処理する。
+// 接続を閉じるなら false を返す。
 static bool drain_events(client *c) {
     ws_event ev;
     while (ws_conn_poll(&c->conn, &ev) != WS_EV_NONE)
@@ -156,13 +156,13 @@ static bool drain_events(client *c) {
     return true;
 }
 
-// True when the connection made no progress and is no longer open (stuck).
+// 接続が進展せず、もはや OPEN でない (詰まっている) とき真。
 static bool feed_stalled(const client *c, size_t used) {
     return used == 0 && ws_conn_status(&c->conn) != WS_ST_OPEN;
 }
 
-// Consume one slice starting at *off: dispatch its events and advance *off.
-// Returns false to close the connection.
+// *off から始まる 1 スライスを消費する: そのイベントを処理し *off を進める。
+// 接続を閉じるなら false を返す。
 static bool feed_step(client *c, const u8 *buf, size_t len, size_t *off) {
     size_t used = ws_conn_recv(&c->conn, buf + *off, len - *off);
     if (!drain_events(c) || feed_stalled(c, used))
@@ -171,7 +171,7 @@ static bool feed_step(client *c, const u8 *buf, size_t len, size_t *off) {
     return true;
 }
 
-// Feed a freshly read chunk through the connection; returns false to close.
+// 読み込んだばかりのチャンクを接続に流し込む。接続を閉じるなら false を返す。
 static bool feed_frames(client *c, const u8 *buf, size_t len) {
     size_t off = 0;
     while (off < len)
@@ -180,45 +180,45 @@ static bool feed_frames(client *c, const u8 *buf, size_t len) {
     return true;
 }
 
-// Step outcome for one read+process iteration.
+// 1 回の読み込み + 処理ループの結果。
 typedef enum { STEP_MORE, STEP_KEEP, STEP_DROP } step;
 
-// Advance the handshake by the n bytes just read into c->hs.
+// c->hs に読み込んだばかりの n バイト分、ハンドシェイクを進める。
 static step hs_step(client *c, size_t n) {
     c->hs_len += n;
     bool fail = false;
-    try_handshake(c, &fail); // incomplete header just loops for more bytes
+    try_handshake(c, &fail); // ヘッダ未完なら追加バイトを待ってループするだけ
     return fail ? STEP_DROP : STEP_MORE;
 }
 
-// Read once in the active phase. Returns the byte count or <=0 from sys_read;
-// STEP-free, the caller classifies n.
+// アクティブ段階で 1 回読む。sys_read のバイト数または <=0 を返す。
+// step は返さず、n の分類は呼び出し側が行う。
 static i64 service_read(client *c) {
     if (c->hs_done)
         return sys_read(c->fd, g_rx, RXBUF);
     if (c->hs_len >= HSBUF)
-        return 0; // request too large: treat as peer-closed -> drop
+        return 0; // リクエストが大きすぎる: 相手切断扱いにして破棄する
     return sys_read(c->fd, c->hs + c->hs_len, HSBUF - c->hs_len);
 }
 
-// Process n>0 bytes just read in the active phase.
+// アクティブ段階で読み込んだ n>0 バイトを処理する。
 static step service_consume(client *c, size_t n) {
     if (!c->hs_done)
         return hs_step(c, n);
     return feed_frames(c, g_rx, n) ? STEP_MORE : STEP_DROP;
 }
 
-// Read once in the right phase and process the result.
+// 現在の段階に応じて 1 回読み、その結果を処理する。
 static step service_step(client *c) {
     i64 n = service_read(c);
     if (n == 0)
-        return STEP_DROP; // peer closed (or request too large)
+        return STEP_DROP; // 相手が切断 (またはリクエストが大きすぎる)
     if (n < 0)
-        return STEP_KEEP; // EAGAIN: nothing left for now, keep open
+        return STEP_KEEP; // EAGAIN: 今は読むものがない。接続は保つ
     return service_consume(c, (size_t) n);
 }
 
-// Drain everything readable on one client until EAGAIN; returns false to close.
+// 1 クライアントから読めるものを EAGAIN まで全て読み切る。接続を閉じるなら false を返す。
 static bool service_client(client *c) {
     for (;;) {
         step s = service_step(c);
@@ -228,7 +228,7 @@ static bool service_client(client *c) {
     }
 }
 
-// Bind fd to PORT and start listening. Returns 0 on success, <0 on failure.
+// fd を PORT にバインドして listen を開始する。成功で 0、失敗で <0 を返す。
 static int bind_listen(int fd) {
     int one = 1;
     sys_setsockopt(fd, WS_SOL_SOCKET, WS_SO_REUSEADDR, &one, sizeof one);
@@ -259,17 +259,17 @@ static void drop_client(int epfd, client *c) {
     c->fd = -1;
 }
 
-// Register an accepted fd into a free slot, or refuse it if the table is full.
+// accept した fd を空きスロットに登録する。テーブルが満杯なら拒否する。
 static void admit_client(int epfd, int cfd) {
     if (!slot_alloc(cfd)) {
-        sys_close(cfd); // table full: refuse
+        sys_close(cfd); // テーブル満杯: 拒否する
         return;
     }
     sys_set_nonblock(cfd);
     ep_add(epfd, cfd);
 }
 
-// Accept every pending connection on the listening socket into a free slot.
+// listen ソケットで保留中の接続をすべて空きスロットへ accept する。
 static void accept_all(int epfd, int lfd) {
     for (;;) {
         int cfd = sys_accept(lfd, NULL, NULL);
@@ -279,14 +279,14 @@ static void accept_all(int epfd, int lfd) {
     }
 }
 
-// Service a known client fd, dropping it if the connection should close.
+// 既知のクライアント fd を処理し、接続を閉じるべきなら破棄する。
 static void on_client(int epfd, int fd) {
     client *c = slot_find(fd);
     if (c && !service_client(c))
         drop_client(epfd, c);
 }
 
-// Handle one ready fd: accept on the listener, otherwise service the client.
+// 準備できた fd を 1 つ処理する: リスナーなら accept、それ以外はクライアントを処理。
 static void on_ready(int epfd, int lfd, int fd) {
     if (fd == lfd)
         accept_all(epfd, lfd);
@@ -299,8 +299,8 @@ static void clients_init(void) {
         g_clients[i].fd = -1;
 }
 
-// Create the listener + epoll, registering the listener. Returns the epoll fd
-// in *epfd and the listen fd in *lfd, or <0 on failure.
+// リスナーと epoll を作り、リスナーを登録する。epoll fd を *epfd に、
+// listen fd を *lfd に返す。失敗時は <0。
 static int setup(int *epfd, int *lfd) {
     clients_init();
     *lfd = listen_socket();
@@ -311,7 +311,7 @@ static int setup(int *epfd, int *lfd) {
     return *epfd < 0 ? -1 : (ep_add(*epfd, *lfd), 0);
 }
 
-// Block on epoll and dispatch every ready fd. Never returns.
+// epoll でブロックし、準備できた fd をすべて処理する。決して return しない。
 static void event_loop(int epfd, int lfd) {
     ws_epoll_event evs[MAX_CONN + 1];
     for (;;) {
@@ -326,21 +326,21 @@ static int run(void) {
     if (setup(&epfd, &lfd) < 0)
         return 1;
     event_loop(epfd, lfd);
-    return 0; // unreachable: event_loop never returns
+    return 0; // 到達しない: event_loop は決して return しない
 }
 
-// Freestanding entry point. The kernel jumps here with RSP 16-byte aligned,
-// but the SysV ABI expects RSP%16==8 on function entry (as if after a CALL).
-// Align then call so SSE moves (movaps) in callees don't fault.
-// _start is the mandated process entry symbol; the reserved name is required.
+// フリースタンディングのエントリポイント。カーネルは RSP を 16 バイト境界に
+// 揃えてここへ飛ぶが、SysV ABI は関数入口で RSP%16==8 を期待する (CALL 直後と同じ)。
+// 揃えてから call することで、呼び出し先の SSE 命令 (movaps) がフォルトしないようにする。
+// _start はプロセスのエントリシンボルとして必須で、予約名を使う必要がある。
 // NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c)
 __attribute__((naked, noreturn)) void _start(void) {
-    __asm__ volatile("xor %rbp, %rbp\n\t" // mark outermost frame
-                     "and $-16, %rsp\n\t" // 16-byte align
-                     "call ws_main\n\t"); // RSP%16==8 on entry, ABI-correct
+    __asm__ volatile("xor %rbp, %rbp\n\t" // 最外フレームであることを示す
+                     "and $-16, %rsp\n\t" // 16 バイト境界に揃える
+                     "call ws_main\n\t"); // 入口で RSP%16==8、ABI に適合
 }
 
-// Real entry, called with a correctly aligned stack.
+// 正しく整列したスタックで呼ばれる本来のエントリ。
 __attribute__((used, noreturn)) void ws_main(void) {
     sys_exit(run());
 }
