@@ -17,6 +17,7 @@ typedef struct {
     size_t msg_len;  // bytes accumulated for the current message
     u8 msg_opcode;   // opcode of the first fragment (TEXT/BINARY)
     bool in_message; // a fragmented data message is in progress
+    bool close_sent; // we have already emitted a Close frame (S-03/S-05)
 
     ws_utf8_state utf8; // running UTF-8 check for text messages
 
@@ -273,6 +274,9 @@ static size_t build_frame(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 
 }
 
 size_t ws_send_message(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap) {
+    // S-03: once a Close has been sent, no further data frames may go out.
+    if (impl(c)->close_sent)
+        return 0;
     return build_frame(c, opcode, data, len, out, cap);
 }
 size_t ws_send_ping(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap) {
@@ -282,9 +286,19 @@ size_t ws_send_pong(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap)
     return build_frame(c, WS_OP_PONG, data, len, out, cap);
 }
 size_t ws_send_close(ws_conn *c, u16 code, u8 *out, size_t cap) {
+    conn_impl *m = impl(c);
+    // S-05: send Close at most once. If we already replied/initiated, do nothing.
+    if (m->close_sent)
+        return 0;
     if (reserved_close_code(code))
         code = 1000; // M-06: never emit 1005/1006/1015 on the wire
     u8 payload[2] = {(u8) (code >> 8), (u8) (code & 0xFF)};
-    impl(c)->state = WS_ST_CLOSING;
-    return build_frame(c, WS_OP_CLOSE, payload, 2, out, cap);
+    size_t n = build_frame(c, WS_OP_CLOSE, payload, 2, out, cap);
+    if (n == 0)
+        return 0;
+    m->close_sent = true;
+    // If the peer already closed (we were in CLOSING), the handshake is now
+    // complete -> CLOSED. Otherwise we initiate the close -> CLOSING.
+    m->state = (m->state == WS_ST_CLOSING) ? WS_ST_CLOSED : WS_ST_CLOSING;
+    return n;
 }
