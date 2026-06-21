@@ -123,13 +123,17 @@ static void begin_message(conn_impl *m, const ws_frame_header *h) {
 }
 
 // 1 フラグメント分のペイロードを追加し、継続的な UTF-8 検査を進める。
+// pl は recv バッファ上の位置 (旧 msg_len 起点) を指す。begin_message が
+// msg_len を 0 に戻すと dst (msg+msg_len) と pl が重なり前方コピーになるため、
+// ws_memmove で安全にずらし、検査は確定後の dst 側から読む。
 static bool append_payload(conn_impl *m, const ws_frame_header *h, const u8 *pl) {
     if (m->msg_len + h->payload_len > m->msg_cap)
         return false;
-    ws_memcpy(m->msg + m->msg_len, pl, h->payload_len);
+    u8 *dst = m->msg + m->msg_len;
+    ws_memmove(dst, pl, h->payload_len);
     m->msg_len += h->payload_len;
     bool is_text = (m->msg_opcode == WS_OP_TEXT);
-    return !is_text || ws_utf8_feed(&m->utf8, pl, h->payload_len);
+    return !is_text || ws_utf8_feed(&m->utf8, dst, h->payload_len);
 }
 
 // 必要ならメッセージを開始し、このフラグメントのペイロードを追加する。
