@@ -7,7 +7,8 @@
 - `just build`：freestanding 静的アーカイブ `build/libws.a` とデモサーバ `build/ws_server` をビルドする。
 - `just test`：各層のユニットテストを実行する（ホスト toolchain でコンパイルし、white-box で include する）。
 - `just e2e`：実 TCP で、stdlib のみの Python WS クライアントが freestanding サーバを駆動する（echo、ping、fragment、100KB、close、不正 UTF-8 の拒否、並行接続）。
-- `just cyclo`：lizard で循環的複雑度を計測し、CCN が 10 を超えたら失敗する。
+- `just cyclo`：lizard で循環的複雑度を計測し、CCN が 3 を超えたら失敗する。
+- `just verify-freestanding`：デモサーバが libc にリンクしていないことを検証する（動的ローダ要求・共有ライブラリ依存・未定義シンボルがないこと）。
 - `just lint`：clang-format のチェックと clang-tidy を実行する（findings はエラー扱い）。
 - `just bench`：フレーム parse と unmask のローカルスループットを計測する（ns/op、MiB/s）。
 - `just proof`：Lean 4 で形式検証を実行する（`lake build`）。
