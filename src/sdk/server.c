@@ -11,10 +11,10 @@
 #include "platform/mem.h"
 #include "protocol/handshake.h"
 
-#define PORT     9001
-#define RXBUF    (1u << 16)
-#define MSGBUF   WS_MAX_MESSAGE
-#define TXBUF    (WS_MAX_MESSAGE + 16)
+#define PORT   9001
+#define RXBUF  (1u << 16)
+#define MSGBUF WS_MAX_MESSAGE
+#define TXBUF  (WS_MAX_MESSAGE + 16)
 
 static u8 g_rx[RXBUF];
 static u8 g_msg[MSGBUF];
@@ -35,12 +35,12 @@ static bool do_handshake(int cfd) {
             break;
     }
     const char *key;
-    size_t      klen = ws_handshake_find_key((const char *) g_rx, got, &key);
+    size_t klen = ws_handshake_find_key((const char *) g_rx, got, &key);
     if (klen == 0)
         return false;
     char accept[WS_ACCEPT_KEY_LEN + 1];
     ws_handshake_accept(key, klen, accept);
-    char   resp[256];
+    char resp[256];
     size_t rlen = ws_handshake_response(accept, resp, sizeof resp);
     return sys_write(cfd, resp, rlen) == (i64) rlen;
 }
@@ -117,9 +117,9 @@ static int listen_socket(void) {
     int one = 1;
     sys_setsockopt(fd, WS_SOL_SOCKET, WS_SO_REUSEADDR, &one, sizeof one);
     ws_sockaddr_in addr = {0};
-    addr.sin_family     = WS_AF_INET;
-    addr.sin_port       = ws_htons(PORT);
-    addr.sin_addr       = WS_INADDR_ANY;
+    addr.sin_family = WS_AF_INET;
+    addr.sin_port = ws_htons(PORT);
+    addr.sin_addr = WS_INADDR_ANY;
     if (sys_bind(fd, &addr, sizeof addr) < 0)
         return -1;
     if (sys_listen(fd, 16) < 0)

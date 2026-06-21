@@ -1,8 +1,7 @@
 // base64 encode (RFC4648 standard alphabet). No libc.
 #include "protocol/base64.h"
 
-static const char B64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 size_t ws_base64_encode(const u8 *data, size_t len, char *out) {
     size_t o = 0;

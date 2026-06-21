@@ -3,7 +3,7 @@
 #include "platform/mem.h"
 
 void *ws_memcpy(void *dst, const void *src, size_t n) {
-    u8       *d = (u8 *) dst;
+    u8 *d = (u8 *) dst;
     const u8 *s = (const u8 *) src;
     for (size_t i = 0; i < n; i++)
         d[i] = s[i];

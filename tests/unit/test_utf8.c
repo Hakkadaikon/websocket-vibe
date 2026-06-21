@@ -7,16 +7,16 @@
 
 #include "../../src/core/utf8.c"
 
-#define VALID(...)                                                                     \
-    do {                                                                               \
-        u8 b[] = {__VA_ARGS__};                                                         \
-        assert(ws_utf8_valid(b, sizeof b) == true);                                    \
+#define VALID(...)                                                                                 \
+    do {                                                                                           \
+        u8 b[] = {__VA_ARGS__};                                                                    \
+        assert(ws_utf8_valid(b, sizeof b) == true);                                                \
     } while (0)
 
-#define INVALID(...)                                                                   \
-    do {                                                                               \
-        u8 b[] = {__VA_ARGS__};                                                         \
-        assert(ws_utf8_valid(b, sizeof b) == false);                                   \
+#define INVALID(...)                                                                               \
+    do {                                                                                           \
+        u8 b[] = {__VA_ARGS__};                                                                    \
+        assert(ws_utf8_valid(b, sizeof b) == false);                                               \
     } while (0)
 
 static void test_valid(void) {

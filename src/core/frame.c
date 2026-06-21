@@ -18,11 +18,10 @@ static void write_be(u8 *p, size_t n, u64 v) {
 
 // Decode the length field; sets *consumed to extra bytes after the 2nd byte.
 // Returns parse status; enforces minimal (canonical) encoding.
-static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_len,
-                                 size_t *extra) {
+static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_len, size_t *extra) {
     if (len7 < 126) {
         *out_len = len7;
-        *extra   = 0;
+        *extra = 0;
         return WS_PARSE_OK;
     }
     if (len7 == 126) {
@@ -32,7 +31,7 @@ static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_le
         if (v < 126) // non-minimal: should have used 1-byte form
             return WS_PARSE_ERROR;
         *out_len = v;
-        *extra   = 2;
+        *extra = 2;
         return WS_PARSE_OK;
     }
     // len7 == 127
@@ -44,7 +43,7 @@ static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_le
     if (v <= 0xFFFF) // non-minimal: should have used 2-byte form
         return WS_PARSE_ERROR;
     *out_len = v;
-    *extra   = 8;
+    *extra = 8;
     return WS_PARSE_OK;
 }
 
@@ -52,26 +51,26 @@ ws_parse_status ws_frame_parse_header(const u8 *buf, size_t len, ws_frame_header
     if (len < 2)
         return WS_PARSE_NEED_MORE;
 
-    u8  b0 = buf[0], b1 = buf[1];
+    u8 b0 = buf[0], b1 = buf[1];
     u64 plen;
     size_t extra;
     ws_parse_status st = parse_len(buf, len, b1 & 0x7Fu, &plen, &extra);
     if (st != WS_PARSE_OK)
         return st;
 
-    bool   masked  = (b1 & 0x80u) != 0;
-    size_t hdr     = 2 + extra + (masked ? 4u : 0u);
+    bool masked = (b1 & 0x80u) != 0;
+    size_t hdr = 2 + extra + (masked ? 4u : 0u);
     if (len < hdr)
         return WS_PARSE_NEED_MORE;
 
-    out->fin    = (b0 & 0x80u) != 0;
-    out->rsv1   = (b0 & 0x40u) != 0;
-    out->rsv2   = (b0 & 0x20u) != 0;
-    out->rsv3   = (b0 & 0x10u) != 0;
+    out->fin = (b0 & 0x80u) != 0;
+    out->rsv1 = (b0 & 0x40u) != 0;
+    out->rsv2 = (b0 & 0x20u) != 0;
+    out->rsv3 = (b0 & 0x10u) != 0;
     out->opcode = b0 & 0x0Fu;
     out->masked = masked;
     out->payload_len = plen;
-    out->header_len  = hdr;
+    out->header_len = hdr;
     if (masked) {
         for (size_t i = 0; i < 4; i++)
             out->mask_key[i] = buf[2 + extra + i];
@@ -103,7 +102,10 @@ static size_t build_len(u8 *buf, u64 payload_len) {
 
 size_t ws_frame_build_header(u8 *buf, size_t cap, bool fin, u8 opcode, bool masked,
                              const u8 mask_key[4], u64 payload_len) {
-    size_t need = 2 + (payload_len <= 125 ? 0u : payload_len <= 0xFFFF ? 2u : 8u) +
+    size_t need = 2 +
+                  (payload_len <= 125      ? 0u
+                   : payload_len <= 0xFFFF ? 2u
+                                           : 8u) +
                   (masked ? 4u : 0u);
     if (cap < need)
         return 0;

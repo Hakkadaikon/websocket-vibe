@@ -8,8 +8,8 @@
 #include "../../src/core/frame.c"
 
 static void roundtrip(u64 len, size_t expect_hdr) {
-    u8  key[4] = {0x12, 0x34, 0x56, 0x78};
-    u8  buf[14];
+    u8 key[4] = {0x12, 0x34, 0x56, 0x78};
+    u8 buf[14];
     size_t n = ws_frame_build_header(buf, sizeof buf, true, WS_OP_BINARY, true, key, len);
     assert(n == expect_hdr);
 
@@ -25,11 +25,11 @@ static void roundtrip(u64 len, size_t expect_hdr) {
 }
 
 static void test_roundtrip_all_forms(void) {
-    roundtrip(0, 6);       // 1-byte len + 4 mask
-    roundtrip(125, 6);     // boundary of 1-byte form
-    roundtrip(126, 8);     // 2-byte form + mask
-    roundtrip(65535, 8);   // boundary of 2-byte form
-    roundtrip(65536, 14);  // 8-byte form + mask
+    roundtrip(0, 6);      // 1-byte len + 4 mask
+    roundtrip(125, 6);    // boundary of 1-byte form
+    roundtrip(126, 8);    // 2-byte form + mask
+    roundtrip(65535, 8);  // boundary of 2-byte form
+    roundtrip(65536, 14); // 8-byte form + mask
     roundtrip(1u << 20, 14);
 }
 
@@ -42,8 +42,8 @@ static void test_unmasked_header_sizes(void) {
 
 static void test_need_more(void) {
     u8 buf[14];
-    size_t n = ws_frame_build_header(buf, sizeof buf, true, WS_OP_BINARY, true,
-                                     (u8[]){1, 2, 3, 4}, 65536);
+    size_t n =
+        ws_frame_build_header(buf, sizeof buf, true, WS_OP_BINARY, true, (u8[]){1, 2, 3, 4}, 65536);
     ws_frame_header h;
     // Truncated at every prefix shorter than the header must say NEED_MORE.
     for (size_t k = 0; k < n; k++)

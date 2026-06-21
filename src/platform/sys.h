@@ -26,11 +26,13 @@ void sys_exit(int code) __attribute__((noreturn));
 // sockaddr_in laid out per the kernel ABI.
 typedef struct {
     u16 sin_family;
-    u16 sin_port;   // network byte order
-    u32 sin_addr;   // network byte order
-    u8  sin_zero[8];
+    u16 sin_port; // network byte order
+    u32 sin_addr; // network byte order
+    u8 sin_zero[8];
 } ws_sockaddr_in;
 
-static inline u16 ws_htons(u16 x) { return (u16) ((x << 8) | (x >> 8)); }
+static inline u16 ws_htons(u16 x) {
+    return (u16) ((x << 8) | (x >> 8));
+}
 
 #endif // WS_PLATFORM_SYS_H

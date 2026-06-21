@@ -20,7 +20,7 @@ void ws_mask(u8 *data, size_t len, const u8 key[4]) {
 
     // Rotate kw so its byte 0 corresponds to key[i % 4] at the aligned point.
     unsigned shift = (unsigned) (i & 3u) * 8u;
-    u64      kcur  = (kw >> shift) | (kw << ((64u - shift) & 63u));
+    u64 kcur = (kw >> shift) | (kw << ((64u - shift) & 63u));
     if (shift == 0)
         kcur = kw;
 

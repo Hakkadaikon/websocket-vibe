@@ -19,25 +19,24 @@ static double now_s(void) {
 // header and unmask the payload (the server's per-frame inbound work).
 static void bench_size(size_t payload, long iters) {
     static u8 buf[1 << 20];
-    u8        key[4] = {0xDE, 0xAD, 0xBE, 0xEF};
-    size_t    hn     = ws_frame_build_header(buf, sizeof buf, true, WS_OP_BINARY, true,
-                                             key, payload);
+    u8 key[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+    size_t hn = ws_frame_build_header(buf, sizeof buf, true, WS_OP_BINARY, true, key, payload);
     for (size_t i = 0; i < payload; i++)
         buf[hn + i] = (u8) i;
     ws_mask(buf + hn, payload, key);
 
     volatile u64 sink = 0;
-    double        t0  = now_s();
+    double t0 = now_s();
     for (long it = 0; it < iters; it++) {
         ws_frame_header h;
         ws_frame_parse_header(buf, hn + payload, &h);
         ws_mask(buf + hn, payload, key); // unmask (involution: keeps data stable)
         sink += h.payload_len + buf[hn];
     }
-    double t1    = now_s();
-    double secs  = t1 - t0;
+    double t1 = now_s();
+    double secs = t1 - t0;
     double bytes = (double) (hn + payload) * (double) iters;
-    double nsop  = secs / (double) iters * 1e9;
+    double nsop = secs / (double) iters * 1e9;
     printf("  payload=%7zu  %8.1f MiB/s  %8.1f ns/op  (sink=%llu)\n", payload,
            bytes / secs / (1024.0 * 1024.0), nsop, (unsigned long long) sink);
 }

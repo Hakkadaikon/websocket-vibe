@@ -6,8 +6,8 @@
 // Returns false if `b` is not a valid lead/ASCII byte.
 static void set_seq(ws_utf8_state *s, u8 remaining, u8 lo, u8 hi) {
     s->remaining = remaining;
-    s->lo        = lo;
-    s->hi        = hi;
+    s->lo = lo;
+    s->hi = hi;
 }
 
 // 3-byte leads: E0 forbids overlong (1st cont >= A0), ED forbids surrogates

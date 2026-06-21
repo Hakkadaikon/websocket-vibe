@@ -12,14 +12,14 @@
 static void hex(const u8 *d, size_t n, char *out) {
     static const char *h = "0123456789abcdef";
     for (size_t i = 0; i < n; i++) {
-        out[2 * i]     = h[d[i] >> 4];
+        out[2 * i] = h[d[i] >> 4];
         out[2 * i + 1] = h[d[i] & 0xF];
     }
     out[2 * n] = 0;
 }
 
 static void test_sha1_vectors(void) {
-    u8   d[20];
+    u8 d[20];
     char s[41];
     ws_sha1((const u8 *) "abc", 3, d);
     hex(d, 20, s);
@@ -58,20 +58,19 @@ static void test_accept_key(void) {
 }
 
 static void test_find_key(void) {
-    const char *req =
-        "GET /chat HTTP/1.1\r\n"
-        "Host: server.example.com\r\n"
-        "Upgrade: websocket\r\n"
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n";
+    const char *req = "GET /chat HTTP/1.1\r\n"
+                      "Host: server.example.com\r\n"
+                      "Upgrade: websocket\r\n"
+                      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                      "Sec-WebSocket-Version: 13\r\n\r\n";
     const char *val = NULL;
-    size_t      n   = ws_handshake_find_key(req, strlen(req), &val);
+    size_t n = ws_handshake_find_key(req, strlen(req), &val);
     assert(n == 24);
     assert(memcmp(val, "dGhlIHNhbXBsZSBub25jZQ==", 24) == 0);
 
     // Case-insensitive header name.
     const char *req2 = "sec-websocket-key:   abc\r\n\r\n";
-    n                = ws_handshake_find_key(req2, strlen(req2), &val);
+    n = ws_handshake_find_key(req2, strlen(req2), &val);
     assert(n == 3 && memcmp(val, "abc", 3) == 0);
 
     // Absent.

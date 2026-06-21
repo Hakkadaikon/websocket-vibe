@@ -15,27 +15,27 @@ typedef enum {
 } ws_role;
 
 typedef enum {
-    WS_ST_OPEN    = 0,
+    WS_ST_OPEN = 0,
     WS_ST_CLOSING = 1,
-    WS_ST_CLOSED  = 2,
+    WS_ST_CLOSED = 2,
 } ws_conn_state;
 
 // Events surfaced to the caller after ws_conn_recv().
 typedef enum {
-    WS_EV_NONE    = 0, // need more bytes
+    WS_EV_NONE = 0,    // need more bytes
     WS_EV_MESSAGE = 1, // a complete data message is ready (text/binary)
-    WS_EV_PING    = 2,
-    WS_EV_PONG    = 3,
-    WS_EV_CLOSE   = 4, // peer initiated close
-    WS_EV_ERROR   = 5, // protocol violation; connection must close
+    WS_EV_PING = 2,
+    WS_EV_PONG = 3,
+    WS_EV_CLOSE = 4, // peer initiated close
+    WS_EV_ERROR = 5, // protocol violation; connection must close
 } ws_event_type;
 
 typedef struct {
     ws_event_type type;
-    u8            opcode;     // WS_OP_TEXT / WS_OP_BINARY for MESSAGE
-    const u8     *data;       // payload (into the conn's message buffer)
-    size_t        len;
-    u16           close_code; // for WS_EV_CLOSE
+    u8 opcode;      // WS_OP_TEXT / WS_OP_BINARY for MESSAGE
+    const u8 *data; // payload (into the conn's message buffer)
+    size_t len;
+    u16 close_code; // for WS_EV_CLOSE
 } ws_event;
 
 // Opaque connection. Storage is caller-provided (no malloc in freestanding).
@@ -49,18 +49,17 @@ typedef struct {
 // --- lifecycle ---
 // Initialize `c` in place. `msg_buf`/`msg_cap` back the message-aggregation
 // buffer (must outlive the connection). Returns false if storage too small.
-bool          ws_conn_init(ws_conn *c, ws_role role, u8 *msg_buf, size_t msg_cap);
+bool ws_conn_init(ws_conn *c, ws_role role, u8 *msg_buf, size_t msg_cap);
 ws_conn_state ws_conn_status(const ws_conn *c);
 
 // --- inbound: feed received bytes, drain events ---
 // Feed up to `len` bytes; returns bytes consumed. Call ws_conn_poll() until it
 // yields WS_EV_NONE to drain all complete events from the fed bytes.
-size_t        ws_conn_recv(ws_conn *c, const u8 *buf, size_t len);
+size_t ws_conn_recv(ws_conn *c, const u8 *buf, size_t len);
 ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev);
 
 // --- outbound: build frames into caller buffer, returns bytes written (0=fail) ---
-size_t ws_send_message(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out,
-                       size_t cap);
+size_t ws_send_message(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap);
 size_t ws_send_ping(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap);
 size_t ws_send_pong(ws_conn *c, const u8 *data, size_t len, u8 *out, size_t cap);
 size_t ws_send_close(ws_conn *c, u16 code, u8 *out, size_t cap);

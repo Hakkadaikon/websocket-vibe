@@ -9,7 +9,7 @@
 static void test_xor_spec(void) {
     // transformed[i] = data[i] ^ key[i % 4]
     u8 data[7] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-    u8 key[4]  = {0xDE, 0xAD, 0xBE, 0xEF};
+    u8 key[4] = {0xDE, 0xAD, 0xBE, 0xEF};
     u8 expect[7];
     for (size_t i = 0; i < 7; i++)
         expect[i] = (u8) (data[i] ^ key[i % 4]);
