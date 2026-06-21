@@ -1,5 +1,13 @@
 #include "core/frame.h"
 
+// RFC6455 §5.2 の長さコーデック境界 (Lean WsProof.LengthCodec と対応)。
+enum {
+    WS_LEN7_MAX = 125,     // この値以下は len7 に直接符号化
+    WS_LEN7_16BIT = 126,   // len7 マーカー: 続く 2 バイト BE が実長
+    WS_LEN7_64BIT = 127,   // len7 マーカー: 続く 8 バイト BE が実長
+    WS_LEN16_MAX = 0xFFFF, // 2 バイト形式で表せる最大長 (65535)
+};
+
 // --- ビッグエンディアン補助 (Lean モデル fromBE / byteAt に対応) ---
 
 static u64 read_be(const u8 *p, size_t n) {
@@ -21,7 +29,7 @@ static ws_parse_status parse_len16(const u8 *buf, size_t len, u64 *out_len, size
     if (len < 4)
         return WS_PARSE_NEED_MORE;
     u64 v = read_be(buf + 2, 2);
-    if (v < 126) // 非最小: 1 バイト形式で表せる値はそちらを使うべき
+    if (v < WS_LEN7_16BIT) // 非最小: 1 バイト形式で表せる値はそちらを使うべき
         return WS_PARSE_ERROR;
     *out_len = v;
     *extra = 2;
@@ -33,7 +41,7 @@ static ws_parse_status parse_len16(const u8 *buf, size_t len, u64 *out_len, size
 static ws_parse_status check_len64(u64 v) {
     if (v & 0x8000000000000000u) // 最上位ビットは 0 でなければならない (RFC6455 §5.2)
         return WS_PARSE_ERROR;
-    if (v <= 0xFFFF) // 非最小: 2 バイト形式で表せる値はそちらを使うべき
+    if (v <= WS_LEN16_MAX) // 非最小: 2 バイト形式で表せる値はそちらを使うべき
         return WS_PARSE_ERROR;
     return WS_PARSE_OK;
 }
@@ -55,12 +63,12 @@ static ws_parse_status parse_len64(const u8 *buf, size_t len, u64 *out_len, size
 // 長さフィールドをデコードする。*extra に 2 バイト目以降の追加バイト数を設定する。
 // パース状態を返す。最小 (正準) 符号化を強制する。
 static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_len, size_t *extra) {
-    if (len7 < 126) {
+    if (len7 < WS_LEN7_16BIT) {
         *out_len = len7;
         *extra = 0;
         return WS_PARSE_OK;
     }
-    if (len7 == 126)
+    if (len7 == WS_LEN7_16BIT)
         return parse_len16(buf, len, out_len, extra);
     return parse_len64(buf, len, out_len, extra);
 }
@@ -128,9 +136,9 @@ ws_parse_status ws_frame_parse_header(const u8 *buf, size_t len, ws_frame_header
 
 // あるペイロード長に必要な追加長バイト数 (先頭 2 ヘッダバイトを除く)。
 static size_t len_extra(u64 payload_len) {
-    if (payload_len <= 125)
+    if (payload_len <= WS_LEN7_MAX)
         return 0;
-    if (payload_len <= 0xFFFF)
+    if (payload_len <= WS_LEN16_MAX)
         return 2;
     return 8;
 }
@@ -138,16 +146,16 @@ static size_t len_extra(u64 payload_len) {
 // 長さフィールドを buf のインデックス 1 から書き出す。(任意の) マスクキーの
 // 直前までのヘッダ総バイト数を返す。常に最小形式で出力する。
 static size_t build_len(u8 *buf, u64 payload_len) {
-    if (payload_len <= 125) {
+    if (payload_len <= WS_LEN7_MAX) {
         buf[1] = (u8) payload_len;
         return 2;
     }
-    if (payload_len <= 0xFFFF) {
-        buf[1] = 126;
+    if (payload_len <= WS_LEN16_MAX) {
+        buf[1] = WS_LEN7_16BIT;
         write_be(buf + 2, 2, payload_len);
         return 4;
     }
-    buf[1] = 127;
+    buf[1] = WS_LEN7_64BIT;
     write_be(buf + 2, 8, payload_len);
     return 10;
 }
