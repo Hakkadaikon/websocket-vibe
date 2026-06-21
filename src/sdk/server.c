@@ -3,6 +3,7 @@
 // データメッセージをエコーし、ping には pong を返し、クローズハンドシェイクを完了する。
 #include "ws/ws.h"
 
+#include "platform/net.h"
 #include "platform/sys.h"
 
 #include "core/frame.h"
