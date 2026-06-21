@@ -1,6 +1,6 @@
-// White-box test for handshake: SHA-1 + base64 + accept-key + header parse.
-// Oracles: FIPS-180/RFC3174 SHA-1 vectors, RFC4648 base64 vectors, and the
-// canonical RFC6455 §1.3 handshake example.
+// ハンドシェイクのホワイトボックステスト: SHA-1 + base64 + accept キー + ヘッダ解析。
+// 検証基準: FIPS-180/RFC3174 の SHA-1 ベクタ、RFC4648 の base64 ベクタ、
+// RFC6455 §1.3 の正規ハンドシェイク例。
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,7 +50,7 @@ static void test_base64_vectors(void) {
 }
 
 static void test_accept_key(void) {
-    // RFC6455 §1.3 canonical example.
+    // RFC6455 §1.3 の正規例。
     const char *key = "dGhlIHNhbXBsZSBub25jZQ==";
     char acc[WS_ACCEPT_KEY_LEN + 1];
     ws_handshake_accept(key, strlen(key), acc);
@@ -68,12 +68,12 @@ static void test_find_key(void) {
     assert(n == 24);
     assert(memcmp(val, "dGhlIHNhbXBsZSBub25jZQ==", 24) == 0);
 
-    // Case-insensitive header name.
+    // ヘッダ名は大文字小文字を区別しない。
     const char *req2 = "sec-websocket-key:   abc\r\n\r\n";
     n = ws_handshake_find_key(req2, strlen(req2), &val);
     assert(n == 3 && memcmp(val, "abc", 3) == 0);
 
-    // Absent.
+    // 存在しない場合。
     const char *req3 = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
     assert(ws_handshake_find_key(req3, strlen(req3), &val) == 0);
 }
@@ -86,7 +86,7 @@ static void test_response(void) {
     assert(strstr(out, "Upgrade: websocket\r\n") != NULL);
     assert(strstr(out, "Connection: Upgrade\r\n") != NULL);
     assert(strstr(out, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n") != NULL);
-    assert(strstr(out, "\r\n\r\n") != NULL); // terminator present
+    assert(strstr(out, "\r\n\r\n") != NULL); // 終端子が存在する
 }
 
 int main(void) {

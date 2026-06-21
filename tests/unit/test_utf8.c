@@ -1,6 +1,6 @@
-// White-box test for UTF-8 validator. Cases mirror the Lean WsProof.Utf8
-// #eval checks (validate_correct). Plus the streaming/split-sequence path
-// and the Autobahn 6.x fragmented-boundary cases.
+// UTF-8 バリデータのホワイトボックステスト。ケースは Lean WsProof.Utf8 の
+// #eval チェック(validate_correct)に対応。加えてストリーミング/分割シーケンス経路と
+// Autobahn 6.x のフラグメント境界ケースを検証する。
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,37 +20,37 @@
     } while (0)
 
 static void test_valid(void) {
-    assert(ws_utf8_valid((const u8 *) "", 0) == true); // empty
+    assert(ws_utf8_valid((const u8 *) "", 0) == true); // 空
     VALID('h', 'e', 'l', 'l', 'o');                    // ASCII
     VALID(0xC3, 0xA9);                                 // é
     VALID(0xE2, 0x82, 0xAC);                           // €
     VALID(0xF0, 0x9F, 0x98, 0x80);                     // 😀
-    VALID(0xED, 0x9F, 0xBF);                           // U+D7FF (just below surrogates)
-    VALID(0xEE, 0x80, 0x80);                           // U+E000 (just above)
-    VALID(0xF4, 0x8F, 0xBF, 0xBF);                     // U+10FFFF (max)
+    VALID(0xED, 0x9F, 0xBF);                           // U+D7FF(サロゲートの直前)
+    VALID(0xEE, 0x80, 0x80);                           // U+E000(直後)
+    VALID(0xF4, 0x8F, 0xBF, 0xBF);                     // U+10FFFF(最大)
 }
 
 static void test_invalid(void) {
-    INVALID(0x80);                   // lone continuation
-    INVALID(0xC0, 0x80);             // overlong (2-byte)
-    INVALID(0xC1, 0xBF);             // overlong (2-byte)
-    INVALID(0xE0, 0x80, 0x80);       // overlong (3-byte)
-    INVALID(0xED, 0xA0, 0x80);       // surrogate U+D800
-    INVALID(0xED, 0xBF, 0xBF);       // surrogate U+DFFF
-    INVALID(0xF0, 0x80, 0x80, 0x80); // overlong (4-byte)
+    INVALID(0x80);                   // 単独の継続バイト
+    INVALID(0xC0, 0x80);             // 冗長符号化(2 バイト)
+    INVALID(0xC1, 0xBF);             // 冗長符号化(2 バイト)
+    INVALID(0xE0, 0x80, 0x80);       // 冗長符号化(3 バイト)
+    INVALID(0xED, 0xA0, 0x80);       // サロゲート U+D800
+    INVALID(0xED, 0xBF, 0xBF);       // サロゲート U+DFFF
+    INVALID(0xF0, 0x80, 0x80, 0x80); // 冗長符号化(4 バイト)
     INVALID(0xF4, 0x90, 0x80, 0x80); // > U+10FFFF
-    INVALID(0xF5, 0x80, 0x80, 0x80); // > U+10FFFF lead
-    INVALID(0xE2, 0x82);             // truncated
-    INVALID(0xFF);                   // invalid byte
-    INVALID('a', 0xC3, 0x28);        // bad continuation
+    INVALID(0xF5, 0x80, 0x80, 0x80); // > U+10FFFF の先頭バイト
+    INVALID(0xE2, 0x82);             // 途中で切れている
+    INVALID(0xFF);                   // 不正なバイト
+    INVALID('a', 0xC3, 0x28);        // 不正な継続バイト
 }
 
 static void test_streaming_split(void) {
-    // €  = E2 82 AC split across three feeds must still validate.
+    // €  = E2 82 AC を 3 回に分けて送っても妥当と判定されねばならない。
     ws_utf8_state s = {0};
     u8 a = 0xE2, b = 0x82, c = 0xAC;
     assert(ws_utf8_feed(&s, &a, 1) == true);
-    assert(ws_utf8_complete(&s) == false); // pending mid-sequence
+    assert(ws_utf8_complete(&s) == false); // シーケンス途中で保留中
     assert(ws_utf8_feed(&s, &b, 1) == true);
     assert(ws_utf8_feed(&s, &c, 1) == true);
     assert(ws_utf8_complete(&s) == true);
@@ -58,14 +58,14 @@ static void test_streaming_split(void) {
 
 static void test_streaming_bad_split(void) {
     ws_utf8_state s = {0};
-    u8 lead = 0xE0, bad = 0x80; // E0 requires next in A0..BF; 80 is overlong
+    u8 lead = 0xE0, bad = 0x80; // E0 は次バイトが A0..BF であることを要求。80 は冗長符号化
     assert(ws_utf8_feed(&s, &lead, 1) == true);
     assert(ws_utf8_feed(&s, &bad, 1) == false);
 }
 
 static void test_trailing_partial(void) {
     u8 lead = 0xE2;
-    assert(ws_utf8_valid(&lead, 1) == false); // incomplete at end of buffer
+    assert(ws_utf8_valid(&lead, 1) == false); // バッファ末尾で未完
 }
 
 int main(void) {

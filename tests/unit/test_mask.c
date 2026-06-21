@@ -1,5 +1,5 @@
-// White-box test for ws core masking. Predicates mirror the Lean proofs
-// (WsProof.Masking): involution and length preservation.
+// ws コアのマスキングのホワイトボックステスト。述語は Lean の証明
+// (WsProof.Masking)に対応: 対合性と長さの保存。
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,15 +24,15 @@ static void test_involution(void) {
         data[i] = orig[i] = (u8) (i * 7 + 1);
     u8 key[4] = {0x01, 0x80, 0xFF, 0x7A};
     ws_mask(data, 33, key);
-    // After one mask, must differ somewhere (key not all-zero).
+    // 1 回マスクすればどこかが変わるはず(キーは全ゼロではない)。
     assert(memcmp(data, orig, 33) != 0);
-    ws_mask(data, 33, key); // mask again == unmask
+    ws_mask(data, 33, key); // 再度マスク == アンマスク
     assert(memcmp(data, orig, 33) == 0);
 }
 
 static void test_zero_len(void) {
     u8 key[4] = {1, 2, 3, 4};
-    ws_mask(NULL, 0, key); // must not crash / touch memory
+    ws_mask(NULL, 0, key); // クラッシュやメモリアクセスをしてはならない
 }
 
 int main(void) {
