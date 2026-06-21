@@ -1,12 +1,12 @@
-// SHA-1 (RFC3174 / FIPS-180). No libc: self-contained loops.
+// SHA-1 (RFC3174 / FIPS-180)。libc に依存せず、ループだけで完結させる。
 #include "protocol/sha1.h"
 
 static u32 rotl(u32 x, unsigned n) {
     return (x << n) | (x >> (32 - n));
 }
 
-// Per-round (0..3) constants and f-functions. Selected by round index, so
-// callers carry no range branches.
+// ラウンド (0..3) ごとの定数と f 関数。ラウンド番号で選ぶことで、
+// 呼び出し側に範囲判定の分岐を持たせない。
 static const u32 SHA1_K[4] = {0x5A827999u, 0x6ED9EBA1u, 0x8F1BBCDCu, 0xCA62C1D6u};
 
 static u32 sha1_f0(u32 b, u32 c, u32 d) {
@@ -77,14 +77,14 @@ static void sha1_fill(u8 *buf, size_t from, size_t to) {
         buf[j] = 0;
 }
 
-// Append the 64-bit big-endian bit length to the last 8 bytes of the block.
+// ブロックの末尾 8 バイトに 64 ビットのビット長をビッグエンディアンで書き込む。
 static void sha1_put_len(u8 *buf, size_t total, u64 len) {
     u64 bits = len * 8;
     for (unsigned k = 0; k < 8; k++)
         buf[total - 1 - k] = (u8) (bits >> (8 * k));
 }
 
-// Build the final padded block(s) into buf; returns total length (64 or 128).
+// 最終のパディング済みブロックを buf に組み立てる。合計長 (64 または 128) を返す。
 static size_t sha1_pad(u8 buf[128], const u8 *tail, size_t rem, u64 len) {
     for (size_t j = 0; j < rem; j++)
         buf[j] = tail[j];

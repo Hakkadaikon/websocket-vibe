@@ -1,4 +1,4 @@
-// RFC6455 §4 opening handshake. No libc.
+// RFC6455 §4 オープニングハンドシェイク。libc に依存しない。
 #include "protocol/handshake.h"
 
 #include "protocol/base64.h"
@@ -21,17 +21,17 @@ void ws_handshake_accept(const char *key, size_t key_len, char out[WS_ACCEPT_KEY
 
 static char lower(char c) {
     if (c >= 'A' && c <= 'Z')
-        return (char) ((unsigned char) c | 0x20u); // ASCII to-lower, no narrowing
+        return (char) ((unsigned char) c | 0x20u); // ASCII 小文字化。縮小変換を避けるためのキャスト
     return c;
 }
 
-// True if `req[at..]` (within len) matches name char `name[i]` case-insensitively.
+// `req[at..]` (len 内) がヘッダ名の文字 `name[i]` と大文字小文字を無視して一致すれば真。
 static int name_char_eq(const char *req, size_t len, size_t at, const char *name, size_t i) {
     return at + i < len && lower(req[at + i]) == lower(name[i]);
 }
 
-// Case-insensitive compare of `req[at..]` against header name `name` (NUL-term).
-// Returns name length on match, else 0.
+// `req[at..]` をヘッダ名 `name` (NUL 終端) と大文字小文字を無視して比較する。
+// 一致すればヘッダ名の長さを、そうでなければ 0 を返す。
 static size_t match_name(const char *req, size_t len, size_t at, const char *name) {
     size_t i = 0;
     for (; name[i]; i++) {
@@ -49,21 +49,21 @@ static int is_eol(char c) {
     return c == '\r' || c == '\n';
 }
 
-// Skip leading horizontal whitespace from `s` (bounded by len).
+// `s` から始まる先頭の水平方向の空白を読み飛ばす (len で上限を制限)。
 static size_t skip_hws(const char *req, size_t len, size_t s) {
     while (s < len && is_hws(req[s]))
         s++;
     return s;
 }
 
-// Advance from `s` to the first EOL char (bounded by len).
+// `s` から最初の行末文字まで進める (len で上限を制限)。
 static size_t to_eol(const char *req, size_t len, size_t s) {
     while (s < len && !is_eol(req[s]))
         s++;
     return s;
 }
 
-// Length of the header value at `start`, trimming leading WS and stopping at \r or \n.
+// `start` のヘッダ値の長さ。先頭の空白を除き、\r または \n で止まる。
 static size_t value_span(const char *req, size_t len, size_t *start) {
     size_t s = skip_hws(req, len, *start);
     *start = s;
@@ -87,7 +87,7 @@ size_t ws_handshake_find_key(const char *req, size_t len, const char **val) {
 static size_t append(char *out, size_t o, size_t cap, const char *s) {
     for (size_t i = 0; s[i]; i++) {
         if (o >= cap)
-            return cap + 1; // overflow sentinel
+            return cap + 1; // オーバーフローを示すセンチネル値
         out[o++] = s[i];
     }
     return o;
@@ -102,7 +102,7 @@ size_t ws_handshake_response(const char *accept, char *out, size_t cap) {
     o = append(out, o, cap, accept);
     o = append(out, o, cap, "\r\n\r\n");
     if (o >= cap)
-        return 0; // need room for the NUL too
+        return 0; // NUL を入れる領域も必要
     out[o] = 0;
     return o;
 }
