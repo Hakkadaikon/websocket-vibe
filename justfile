@@ -11,19 +11,21 @@ default: build
 _mkdir:
     @mkdir -p {{build_dir}}
 
-# Compile the SDK as a static archive (freestanding).
+# Compile the SDK static archive (freestanding) + the demo server binary.
+# server.c provides _start and is the entry point, so it stays out of libws.a.
 build: _mkdir
     #!/usr/bin/env bash
     set -euo pipefail
-    srcs=$(find src -name '*.c')
-    objs=""
-    for s in $srcs; do
+    libobjs=""
+    for s in $(find src -name '*.c' ! -name 'server.c'); do
       o="{{build_dir}}/$(echo "$s" | tr '/' '_').o"
       {{cc}} {{cflags}} -c "$s" -o "$o"
-      objs="$objs $o"
+      libobjs="$libobjs $o"
     done
-    ar rcs {{build_dir}}/libws.a $objs
-    echo "built {{build_dir}}/libws.a"
+    ar rcs {{build_dir}}/libws.a $libobjs
+    {{cc}} {{cflags}} -c src/sdk/server.c -o {{build_dir}}/server.o
+    {{cc}} -nostdlib -static -fuse-ld=lld -o {{build_dir}}/ws_server {{build_dir}}/server.o {{build_dir}}/libws.a
+    echo "built {{build_dir}}/libws.a and {{build_dir}}/ws_server"
 
 # Unit tests: compiled against host toolchain (libc allowed in test harness only).
 test: _mkdir
