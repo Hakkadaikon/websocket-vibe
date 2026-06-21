@@ -1,6 +1,6 @@
-// Local performance measurement for the hot path: frame header parse + unmask.
-// Reports throughput (MiB/s) and ns/op so regressions are visible run-to-run.
-// Uses host clock_gettime in the harness only; the measured code is the SDK.
+// ホットパス(フレームヘッダ parse + unmask)のローカル性能測定。
+// スループット(MiB/s)と ns/op を出力し、実行ごとの退行を可視化する。
+// ハーネスでのみホストの clock_gettime を使う。測定対象のコードは SDK 本体。
 #define _POSIX_C_SOURCE 200809L
 #include <stdint.h>
 #include <stdio.h>
@@ -15,8 +15,8 @@ static double now_s(void) {
     return (double) ts.tv_sec + (double) ts.tv_nsec * 1e-9;
 }
 
-// Bench one payload size: build a masked frame once, then repeatedly parse the
-// header and unmask the payload (the server's per-frame inbound work).
+// 1 つのペイロードサイズをベンチする。マスク済みフレームを一度組み立て、
+// 以後はヘッダ parse とペイロードの unmask を繰り返す(サーバのフレーム単位の受信処理)。
 static void bench_size(size_t payload, long iters) {
     static u8 buf[1 << 20];
     u8 key[4] = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -30,7 +30,7 @@ static void bench_size(size_t payload, long iters) {
     for (long it = 0; it < iters; it++) {
         ws_frame_header h;
         ws_frame_parse_header(buf, hn + payload, &h);
-        ws_mask(buf + hn, payload, key); // unmask (involution: keeps data stable)
+        ws_mask(buf + hn, payload, key); // unmask(対合なのでデータは安定したまま)
         sink += h.payload_len + buf[hn];
     }
     double t1 = now_s();

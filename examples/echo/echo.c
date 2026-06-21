@@ -1,6 +1,6 @@
-// Echo example — a plain libc WebSocket server that echoes text messages back.
-// Shows how to drive the sans-IO core (ws.h) from ordinary blocking sockets,
-// unlike the freestanding demo in src/sdk/server.c. Single connection at a time.
+// Echo の例 — テキストメッセージをそのまま返す素の libc WebSocket サーバ。
+// src/sdk/server.c の freestanding デモと違い、通常のブロッキングソケットから
+// sans-IO コア(ws.h)を駆動する方法を示す。同時接続は 1 つだけ。
 #include "ws/ws.h"
 
 #include "protocol/handshake.h"
@@ -23,10 +23,10 @@ static int read_handshake(int fd, char *buf, size_t cap) {
         if (got >= 4 && memcmp(buf + got - 4, "\r\n\r\n", 4) == 0)
             return (int) got;
     }
-    return -1; // request larger than the buffer
+    return -1; // リクエストがバッファより大きい
 }
 
-// RFC6455 §4: read the upgrade request, reply 101 with the computed accept key.
+// RFC6455 §4: アップグレード要求を読み、算出した accept キー付きで 101 を返す。
 static bool do_handshake(int fd) {
     char req[RXBUF];
     int len = read_handshake(fd, req, sizeof req);
@@ -54,13 +54,13 @@ static bool write_all(int fd, const u8 *buf, size_t len) {
     return true;
 }
 
-// Drain events from one recv() and react. Returns false to close the connection.
+// 1 回の recv() で得たイベントを処理しきって反応する。false を返すと接続を閉じる。
 static bool handle_events(int fd, ws_conn *c, u8 *tx, size_t tx_cap) {
     ws_event ev;
     while (ws_conn_poll(c, &ev) != WS_EV_NONE) {
         size_t n = 0;
         switch (ev.type) {
-        case WS_EV_MESSAGE: // echo the message straight back
+        case WS_EV_MESSAGE: // メッセージをそのまま返送する
             n = ws_send_message(c, ev.opcode, ev.data, ev.len, tx, tx_cap);
             if (!n || !write_all(fd, tx, n))
                 return false;
