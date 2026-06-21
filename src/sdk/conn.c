@@ -179,15 +179,16 @@ static bool valid_close_code(u16 c) {
 
 // ワイヤ上に現れてはならない予約コード (§7.4.1)。
 static bool reserved_close_code(u16 c) {
-    return c == 1005 || c == 1006 || c == 1015;
+    return c == WS_CLOSE_NO_STATUS || c == WS_CLOSE_ABNORMAL || c == WS_CLOSE_TLS;
 }
 
 // CLOSE 本体からクローズコードをデコードする (§7.4.1)。不正なコードは 1002 に写像する。
 static u16 close_code_from(const ws_frame_header *h, const u8 *pl) {
     if (h->payload_len < 2)
-        return 1005; // 本体がないときの「ステータスなし」既定値
+        return WS_CLOSE_NO_STATUS; // 本体がないときの「ステータスなし」既定値
     u16 code = (u16) ((pl[0] << 8) | pl[1]);
-    return valid_close_code(code) ? code : 1002; // M-07: 範囲外は Protocol Error にする
+    return valid_close_code(code) ? code
+                                  : WS_CLOSE_PROTOCOL; // M-07: 範囲外は Protocol Error にする
 }
 
 // 受信した CLOSE を処理する: CLOSE イベントを発行し、ハンドシェイク状態を進める。
@@ -397,7 +398,7 @@ static void mark_close_sent(conn_impl *m) {
 
 // M-06: 予約ステータス (1005/1006/1015) はワイヤ上に決して送出しない。
 static u16 sanitize_close_code(u16 code) {
-    return reserved_close_code(code) ? 1000 : code;
+    return reserved_close_code(code) ? WS_CLOSE_NORMAL : code;
 }
 
 size_t ws_send_close(ws_conn *c, u16 code, u8 *out, size_t cap) {

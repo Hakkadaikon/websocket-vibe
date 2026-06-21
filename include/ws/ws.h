@@ -20,6 +20,15 @@ typedef enum {
     WS_ST_CLOSED = 2,
 } ws_conn_state;
 
+// クローズコード (RFC6455 §7.4.1)。ws_send_close() の `code` に渡す。
+typedef enum {
+    WS_CLOSE_NORMAL = 1000,    // 正常終了
+    WS_CLOSE_PROTOCOL = 1002,  // プロトコルエラー
+    WS_CLOSE_NO_STATUS = 1005, // 予約: 本体にコードがなかったことを表す内部値
+    WS_CLOSE_ABNORMAL = 1006,  // 予約: 異常切断 (ワイヤに現れない)
+    WS_CLOSE_TLS = 1015,       // 予約: TLS ハンドシェイク失敗 (ワイヤに現れない)
+} ws_close_code;
+
 // ws_conn_recv() の後に呼び出し側へ通知されるイベント。
 typedef enum {
     WS_EV_NONE = 0,    // バイトが足りない

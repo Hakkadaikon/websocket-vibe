@@ -127,13 +127,13 @@ static bool handle_data_event(client *c, const ws_event *ev, bool *handled) {
 
 // 相手のクローズコードをそのまま返す。「コードなし」のセンチネルは 1000 に写像する。
 static u16 echo_close_code(u16 code) {
-    return code == 1005 ? 1000 : code;
+    return code == WS_CLOSE_NO_STATUS ? WS_CLOSE_NORMAL : code;
 }
 
 // 終了系イベント (close/error): 対応する close を送ってから接続を閉じる。
 static bool handle_close_event(client *c, const ws_event *ev) {
     if (ev->type == WS_EV_ERROR)
-        return reply_close(c, ws_send_close(&c->conn, 1002, g_tx, TXBUF));
+        return reply_close(c, ws_send_close(&c->conn, WS_CLOSE_PROTOCOL, g_tx, TXBUF));
     if (ev->type == WS_EV_CLOSE)
         return reply_close(c,
                            ws_send_close(&c->conn, echo_close_code(ev->close_code), g_tx, TXBUF));
