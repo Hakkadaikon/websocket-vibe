@@ -5,6 +5,7 @@
 #include "core/mask.h"
 #include "core/utf8.h"
 #include "platform/mem.h"
+#include "platform/sys.h"
 
 // Internal representation laid over the opaque ws_conn storage.
 typedef struct {
@@ -255,7 +256,13 @@ ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev) {
 static size_t build_frame(ws_conn *c, u8 opcode, const u8 *data, size_t len, u8 *out, size_t cap) {
     conn_impl *m = impl(c);
     bool masked = (m->role == WS_ROLE_CLIENT);
-    u8 key[4] = {0x12, 0x34, 0x56, 0x78}; // ponytail: fixed key; real client needs CSPRNG
+    u8 key[4];
+    if (masked) {
+        // RFC6455 §5.3: each masking key MUST be fresh and from a strong RNG.
+        // Refuse to send rather than emit a predictable key.
+        if (sys_getrandom(key, sizeof key) != (i64) sizeof key)
+            return 0;
+    }
     size_t hn = ws_frame_build_header(out, cap, true, opcode, masked, masked ? key : NULL, len);
     if (hn == 0 || hn + len > cap)
         return 0;
