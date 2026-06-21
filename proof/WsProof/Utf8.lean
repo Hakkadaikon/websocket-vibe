@@ -271,7 +271,7 @@ theorem validate_sound : ∀ bs : List UInt8, validate bs = true → WellFormed 
     have hb' : 0xF1 ≤ b ∧ b ≤ 0xF3 := by simp only [Bool.and_eq_true, decide_eq_true_eq] at hb; exact hb
     unfold validate at h
     simp only [hb1, hb2, hb3, hb4, hb5, hb6, hb7, hb, reduceCtorEq, reduceIte,
-      Bool.and_eq_true, decide_eq_true_eq] at h
+      Bool.and_eq_true] at h
     exact WellFormed.fourMid b c1 c2 c3 rest4 hb' h.1.1.1 h.1.1.2 h.1.2 (ih h.2)
   | case16 b rest hb1 hb2 hb3 hb4 hb5 hb6 hb7 hb hf =>
     intro h
