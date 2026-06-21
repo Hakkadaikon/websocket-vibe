@@ -1,8 +1,8 @@
-// ws — freestanding base types (C23, no libc).
+// ws — フリースタンディングの基本型 (C23、libc に依存しない)。
 #ifndef WS_TYPES_H
 #define WS_TYPES_H
 
-// Freestanding C23 provides these headers without libc.
+// フリースタンディングの C23 は、libc なしでこれらのヘッダを提供する。
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -13,4 +13,4 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int64_t i64;
 
-#endif // WS_TYPES_H
+#endif // WS_TYPES_H のガード終端
