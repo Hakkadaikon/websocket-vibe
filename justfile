@@ -50,6 +50,25 @@ example: build
     {{cc}} {{testflags}} examples/echo/echo.c {{build_dir}}/libws.a -o {{build_dir}}/echo
     @echo "built {{build_dir}}/echo — run it, then connect to ws://127.0.0.1:9002"
 
+# Assert the demo server links no libc: no dynamic loader, no shared-lib
+# dependency, no undefined (externally-resolved) symbols.
+verify-freestanding: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin={{build_dir}}/ws_server
+    fail=0
+    if readelf -l "$bin" | grep -qi INTERP; then
+      echo "FAIL: has a PT_INTERP segment (requests a dynamic loader)"; fail=1
+    fi
+    if readelf -d "$bin" 2>/dev/null | grep -q NEEDED; then
+      echo "FAIL: has DT_NEEDED entries (depends on a shared library)"; fail=1
+    fi
+    if [ -n "$(nm -u "$bin" 2>/dev/null)" ]; then
+      echo "FAIL: has undefined symbols (resolved by an external lib):"; nm -u "$bin"; fail=1
+    fi
+    [ "$fail" -eq 0 ] && echo "verify-freestanding OK — {{build_dir}}/ws_server links no libc"
+    exit $fail
+
 # Local performance measurement.
 bench: _mkdir
     #!/usr/bin/env bash
@@ -57,9 +76,9 @@ bench: _mkdir
     {{cc}} {{testflags}} -O3 -DNDEBUG bench/bench_frame.c -o {{build_dir}}/bench_frame
     {{build_dir}}/bench_frame
 
-# Cyclomatic complexity gate (fail if CCN > 10).
+# Cyclomatic complexity gate (fail if CCN > 3).
 cyclo:
-    lizard src -C 10 -w
+    lizard src -C 3 -w
 
 # Static analysis + format check.
 lint:
@@ -82,5 +101,5 @@ proof:
     cd proof && lake build
 
 # Full CI gate.
-ci: proof lint cyclo build test e2e bench
+ci: proof lint cyclo build verify-freestanding test e2e bench
     @echo "CI OK"
