@@ -1,7 +1,7 @@
-"""Minimal RFC6455 client using only the Python stdlib (no pip deps).
+"""Python stdlib のみで実装した最小限の RFC6455 クライアント(pip 依存なし)。
 
-Used by the E2E harness to drive the freestanding C server. Implements the
-client side: masked frames, handshake, fragmentation, control frames.
+E2E ハーネスが freestanding C サーバを駆動するために使う。クライアント側の
+マスク済みフレーム、ハンドシェイク、フラグメント、制御フレームを実装する。
 """
 import base64
 import hashlib
