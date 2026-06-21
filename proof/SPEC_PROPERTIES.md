@@ -6,9 +6,8 @@
 数学的性質(masking involution, length roundtrip, UTF-8 健全性)は `WsProof.{Masking,LengthCodec,Utf8}` に既証。
 
 全 28 要素を `WsProof.Spec.*` で証明済み(`lake build` 緑・`sorryAx` 非依存)。
-ただし「証明済み」=「定理が緑」であり、一部(F-09/F-10)は長さ正準モデル `decodeCanonical`
-(C `parse_len` 対応)で判定を証明するが `step` 状態機械からは未接続で、C パーサとの一致は test に依存する。
-詳細は末尾「C 実装との対応」を参照。
+フレーム検証性質は正準モデル `step`(状態機械)とワイヤパーサ `parseFrame`/`recvWire`(長さデコード)に
+接続済みで、対応する C コードのバグは Lean の証明を落とす。各性質の接続経路は末尾「C 実装との対応」を参照。
 型 = invariant(単一ステップ不変)/ pre / post / temporal(順序・応答義務・到達可能性)。
 優先 = C(critical)/ I(important)/ N(nice-to-have)。
 
@@ -33,8 +32,8 @@
 | F-06 | メッセージの opcode = 最初のフラグメントの opcode | §5.4 | invariant | C | `aggregate_opcode` (Fragment) |
 | F-07 | RSV1/2/3 が非0(拡張未交渉)なら fail | §5.2 | pre | C | `rsv_nonzero_rejected` (StateMachine) |
 | F-08 | 未知 opcode は fail | §5.2 | pre | C | `unknown_opcode_rejected` (StateMachine) |
-| F-09 | 非最小長エンコードは fail | §5.2 | pre | C | `f09_nonminimal16_rejected_by_decode` / `f09_nonminimal64_rejected_by_decode` / `f09_canonical_accepted`(健全性)— 正準モデル `decodeCanonical` に接続 (Workflow/LengthCodec)。`f09_minimal_length_basis`(`encode_injective` 橋渡し)併存 |
-| F-10 | 64bit 長の最上位ビットが1なら fail | §5.2 | pre | I | `f10_msb_rejected_by_decode` / `f10_msb_rejected_concrete` — 正準モデル `decodeCanonical` に接続 (Workflow/LengthCodec)。`msb_set_len_rejected`(`extendedLenOk`)併存 |
+| F-09 | 非最小長エンコードは fail | §5.2 | pre | C | `recvWire_rejects_nonminimal_16/64`(end-to-end, step 経由)— `decodeCanonical`→`parseFrame`→`recvWire` (Parse)。`f09_*_rejected_by_decode`/`f09_canonical_accepted` (Workflow/LengthCodec) が判定の根拠 |
+| F-10 | 64bit 長の最上位ビットが1なら fail | §5.2 | pre | I | `recvWire_rejects_msb_64`(end-to-end, step 経由)(Parse)。`f10_msb_rejected_by_decode`/`decodeCanonical_rejects_msb_64` (Workflow/LengthCodec) が根拠 |
 | F-11 | N メッセージ送信 → 順序通り N 受信 | §6 | temporal | I | `roundtrip_messages` (Trace) |
 
 ## C. 制御フレーム / タイミング (§5.4, §5.5)
@@ -77,20 +76,24 @@ fin/oversize)、M-02(unmasked 拒否)、S-04(CLOSING でデータ破棄)、M-07(
 `step_close_rejects_invalid` が出力 code を固定し、`conn.c` の `close_code_from` と byte-for-byte 対応)。
 これらは step を変えれば証明が落ちる。
 
-### `step` に**未接続**の孤立定理(保証範囲に注意)
+### `step` に end-to-end 接続済み(ワイヤパーサ経由)
 
-以下は定理としては既証だが、`step`/`Frame` モデルからは呼ばれていない。よって対応する C コードに
-バグを入れても **Lean の証明は緑のまま**。担保は `test_conn.c`/`test_frame.c` の通常ユニットテストに依存する
-(形式検証ではなく test による担保)。
-
-- **F-09/F-10**(長さデコード検証): `LengthCodec.decodeCanonical` が `frame.c` の
-  `parse_len`(`parse_len16`/`parse_len64`/`check_len64`)の「どのバイト列を拒否するか」のモデルで、非最小長(F-09)と
-  64bit MSB 立ち(F-10)を `none` で拒否する(C の NEED_MORE と ERROR は両方 `none` に畳み、拒否理由は区別しない)。
-  `f09_nonminimal16/64_rejected_by_decode`・
-  `f10_msb_rejected_by_decode`(拒否則)と `f09_canonical_accepted`(正準エンコードは必ず受理=健全性)が判定を固定する。
-  ただし `step`/`Frame` 状態機械モデルは長さをパース済みの `payload : List UInt8` として持ち、`decodeCanonical` を
-  呼ばない。よってモデルと C パーサの一致は `test_frame.c` の橋渡しテストで担保する(decodeCanonical の分岐を 1 対 1 で固定)。
-  なお `encode_injective`/`extendedLenOk` の純数論補題(`f09_minimal_length_basis`/`msb_set_len_rejected`)も併存する。
+- **F-09/F-10**(長さデコード検証): ワイヤパーサ `Spec.Parse.parseFrame`(`frame.c` の
+  `ws_frame_parse_header` 対応)が `LengthCodec.decodeCanonical` を呼び、非最小長(F-09)と
+  64bit MSB 立ち(F-10)を拒否(`.error`)する。`recvWire = parseFrame ; step` の合成で、
+  非最小/MSB 立ちのワイヤフレームが **`step` 経由で `(.closed, .error)` になる**ことを
+  `recvWire_rejects_nonminimal_16/64`・`recvWire_rejects_msb_64`(end-to-end)で証明。
+  これで decodeCanonical が状態機械に接続され、長さデコードのバグは Lean の証明を落とす。
+  根拠の階層: `decodeCanonical_rejects_*`(拒否則)→ `parseFrame`(error 伝播)→ `recvWire`(step 合成)。
+  `decodeCanonical_encode`(正準エンコードは必ず受理=健全性)が正常系の非空虚を保証する
+  (正常フレームは `.ok` を返し step に到達)。
+  スコープ: 証明が落とすのは**長さ値の拒否則**(非最小/MSB のワイヤ長は必ず `.error`→接続 fail)。
+  `parseFrame` は `decodeCanonical (len7 :: rest)` と len7 を先頭バイトに再構成して呼ぶ(C `parse_len` は
+  len7 を引数渡し・本体を `buf+2` から読む形だが、長さ判定結果は等価)。バイト不足を `.needMore` に倒す
+  振り分け(C の NEED_MORE と ERROR の境界)は `parseFrame` では証明せず、`test_frame.c` の NEED_MORE/ERROR
+  テストで担保する。payload のマスク解除と内容再現も別証明(`Masking.lean`)の領分として持ち込まない
+  (payload はマスクされたままのバイト列)。
+  なお `encode_injective`/`extendedLenOk` の純数論補題(`f09_minimal_length_basis`/`msb_set_len_rejected`)も併存。
 
 ### 乖離を炙り出して修正した例(test が先に落ち、実装修正で緑化)
 
@@ -98,4 +101,5 @@ fin/oversize)、M-02(unmasked 拒否)、S-04(CLOSING でデータ破棄)、M-07(
 - **M-07**: 受信 close code が無検証だった → §7.4.1 の許容域で検証、域外は 1002(`step` の `.close` 分岐へ接続済み)。
 - **M-06**: `ws_send_close` が予約コードを載せ得た → 1000 へ丸める(送信経路は step 非経由だが M-06 定理と値が対応)。
 - **F-09/F-10**: `frame.c` は既に非最小長・64bit MSB を拒否済み。`decodeCanonical` を正準モデルとして
-  接続し、拒否則と健全性を証明(`step` 状態機械からは未接続のため C パーサとの一致は test 担保)。
+  拒否則・健全性を証明し、さらにワイヤパーサ `parseFrame` 経由で `step` に end-to-end 接続
+  (`recvWire_rejects_nonminimal_16/64`・`recvWire_rejects_msb_64`)。長さデコードのバグは Lean の証明を落とす。
