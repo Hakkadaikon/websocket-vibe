@@ -17,6 +17,13 @@ int sys_accept(int fd, void *addr, u32 *addrlen);
 // Fill buf with n cryptographically-strong random bytes. Returns bytes written
 // (negative is -errno). Used for client frame masking keys (RFC6455 §5.3).
 i64 sys_getrandom(void *buf, size_t n);
+
+// epoll-based readiness multiplexing for the concurrent demo server.
+int sys_epoll_create1(int flags);
+int sys_epoll_ctl(int epfd, int op, int fd, void *ev);
+int sys_epoll_wait(int epfd, void *evs, int maxevents, int timeout);
+int sys_set_nonblock(int fd);
+
 void sys_exit(int code) __attribute__((noreturn));
 
 // Constants we need (Linux/x86-64).
@@ -37,5 +44,16 @@ typedef struct {
 static inline u16 ws_htons(u16 x) {
     return (u16) ((x << 8) | (x >> 8));
 }
+
+// epoll constants (Linux/x86-64).
+#define WS_EPOLL_CTL_ADD 1
+#define WS_EPOLL_CTL_DEL 2
+#define WS_EPOLLIN       0x001u
+
+// struct epoll_event is packed on x86-64 (no padding between events/data).
+typedef struct __attribute__((packed)) {
+    u32 events;
+    u64 data; // we store the fd here
+} ws_epoll_event;
 
 #endif // WS_PLATFORM_SYS_H
