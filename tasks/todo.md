@@ -46,6 +46,12 @@
 - 品質ゲートは just ci に集約: proof / lint(tidy=error) / cyclo(CCN<=10) / build /
   unit / e2e(実TCP) / bench。全て緑。
 - 自己改善ループの実証: bench で計測 → mask を 64bit ワード化 → 約18倍、性質は不変。
-- 既知の簡略化 (ponytail): デモサーバは単一接続・逐次。client 送信マスク鍵は固定
-  (本番 client は CSPRNG が必要、server ロールには無影響)。close は即時応答型。
-  いずれも SDK コア (sans-IO) の正しさには影響せず、需要が出たら拡張する。
+- 既知の簡略化を解消 (旧 ponytail メモ):
+  - client 送信マスク鍵: 固定鍵 → sys_getrandom 由来の CSPRNG 鍵 (RFC6455 §5.3)。
+    getrandom 失敗時は予測可能鍵で送らず送信失敗を選ぶ。test_client_mask_key_random。
+  - close 即時応答 → closing handshake の往復化 (S-03/S-05)。close_sent で
+    高々1回送信・冪等。CLOSING で送れば handshake 完了 → CLOSED。
+  - デモサーバ単一接続・逐次 → epoll 多重化 (MAX_CONN=64、接続ごとに ws_conn と
+    集約バッファ)。E2E で同時8接続・交互送受信を検証。
+- 残る ponytail 簡略化: デモの集約上限は 128KiB (SDK 既定は 1MiB)。接続テーブルは
+  固定長配列 (動的確保なし=freestanding の制約)。いずれもデモ専用で SDK コアに無影響。
