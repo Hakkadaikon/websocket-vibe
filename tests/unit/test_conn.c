@@ -9,6 +9,7 @@
 #include "../../src/core/mask.c"
 #include "../../src/core/utf8.c"
 #include "../../src/platform/mem.c"
+#include "../../src/platform/sys.c"
 #include "../../src/sdk/conn.c"
 
 // Build a client->server frame (masked) into buf. Returns total length.
@@ -197,6 +198,27 @@ static void test_data_discarded_after_close_recv(void) {
     assert(ws_conn_poll(&C, &ev) == WS_EV_NONE); // discarded
 }
 
+static void test_client_mask_key_random(void) {
+    // RFC6455 §5.3: client frames are masked with a fresh, strong-RNG key.
+    // Verify: frames are masked, unmask recovers the data, and two successive
+    // frames do not reuse the same key (i.e. it is not the old fixed key).
+    ws_conn cc;
+    u8 buf[WS_MAX_MESSAGE];
+    assert(ws_conn_init(&cc, WS_ROLE_CLIENT, buf, sizeof buf));
+    u8 a[32], b[32];
+    size_t na = ws_send_message(&cc, WS_OP_BINARY, (const u8 *) "payload!", 8, a, sizeof a);
+    size_t nb = ws_send_message(&cc, WS_OP_BINARY, (const u8 *) "payload!", 8, b, sizeof b);
+    assert(na == 14 && nb == 14);           // 2 hdr + 4 mask key + 8 payload
+    assert((a[1] & 0x80) && (b[1] & 0x80)); // mask bit set
+    // key is bytes [2..5]; with a strong RNG two frames almost surely differ.
+    assert(memcmp(a + 2, b + 2, 4) != 0);
+    // unmask recovers original payload.
+    u8 key[4];
+    memcpy(key, a + 2, 4);
+    ws_mask(a + 6, 8, key);
+    assert(memcmp(a + 6, "payload!", 8) == 0);
+}
+
 static void test_recv_invalid_close_code(void) {
     // M-07: receiving an out-of-range close code surfaces 1002 (Protocol Error).
     reset();
@@ -257,6 +279,7 @@ int main(void) {
     test_pong_echoes_ping_payload();
     test_no_data_after_close_sent();
     test_data_discarded_after_close_recv();
+    test_client_mask_key_random();
     test_recv_invalid_close_code();
     test_recv_valid_close_code();
     test_send_close_sanitizes_code();
