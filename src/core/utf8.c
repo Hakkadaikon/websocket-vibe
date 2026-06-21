@@ -26,37 +26,76 @@ static void lead_4byte(ws_utf8_state *s, u8 b) {
     set_seq(s, 3, lo, hi);
 }
 
-static bool classify_lead(ws_utf8_state *s, u8 b) {
-    if (b <= 0x7F) {
-        s->remaining = 0;
-        return true;
-    }
-    if (b >= 0xC2 && b <= 0xDF) {
-        set_seq(s, 1, 0x80, 0xBF);
-        return true;
-    }
-    if (b >= 0xE0 && b <= 0xEF) {
-        lead_3byte(s, b);
-        return true;
-    }
-    if (b >= 0xF0 && b <= 0xF4) {
-        lead_4byte(s, b);
-        return true;
-    }
-    return false; // 0x80..0xC1 (incl. overlong C0/C1) and 0xF5..0xFF
+// ASCII (single byte). Already a complete sequence.
+static void lead_ascii(ws_utf8_state *s) {
+    s->remaining = 0;
 }
 
-static bool feed_byte(ws_utf8_state *s, u8 b) {
-    if (s->remaining == 0)
-        return classify_lead(s, b);
-    // Continuation byte: must lie in the currently allowed range.
-    if (b < s->lo || b > s->hi)
+// 2-byte leads C2..DF: generic continuation range.
+static void lead_2byte(ws_utf8_state *s) {
+    set_seq(s, 1, 0x80, 0xBF);
+}
+
+// Each tester returns the lead's arity (0=ASCII,1..3) or -1 if not this class.
+static int try_ascii(ws_utf8_state *s, u8 b) {
+    if (b > 0x7F)
+        return -1;
+    lead_ascii(s);
+    return 0;
+}
+
+static int try_2byte(ws_utf8_state *s, u8 b) {
+    if (b < 0xC2 || b > 0xDF)
+        return -1;
+    lead_2byte(s);
+    return 1;
+}
+
+static int try_3byte(ws_utf8_state *s, u8 b) {
+    if (b < 0xE0 || b > 0xEF)
+        return -1;
+    lead_3byte(s, b);
+    return 2;
+}
+
+static int try_4byte(ws_utf8_state *s, u8 b) {
+    if (b < 0xF0 || b > 0xF4)
+        return -1;
+    lead_4byte(s, b);
+    return 3;
+}
+
+typedef int (*lead_tester)(ws_utf8_state *, u8);
+
+static bool classify_lead(ws_utf8_state *s, u8 b) {
+    // 0x80..0xC1 (incl. overlong C0/C1) and 0xF5..0xFF match nothing.
+    static const lead_tester testers[] = {try_ascii, try_2byte, try_3byte, try_4byte};
+    for (size_t k = 0; k < sizeof(testers) / sizeof(testers[0]); k++) {
+        if (testers[k](s, b) >= 0)
+            return true;
+    }
+    return false;
+}
+
+// Continuation byte: must lie in the currently allowed range.
+static bool cont_in_range(const ws_utf8_state *s, u8 b) {
+    return b >= s->lo && b <= s->hi;
+}
+
+static bool feed_cont(ws_utf8_state *s, u8 b) {
+    if (!cont_in_range(s, b))
         return false;
     s->remaining--;
     // After the first continuation, the range relaxes to the generic one.
     s->lo = 0x80;
     s->hi = 0xBF;
     return true;
+}
+
+static bool feed_byte(ws_utf8_state *s, u8 b) {
+    if (s->remaining == 0)
+        return classify_lead(s, b);
+    return feed_cont(s, b);
 }
 
 bool ws_utf8_feed(ws_utf8_state *s, const u8 *buf, size_t len) {
