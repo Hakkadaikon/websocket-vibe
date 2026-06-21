@@ -44,6 +44,12 @@ test: _mkdir
 e2e: build
     python3 tests/e2e/run_e2e.py
 
+# Build the libc-hosted echo example (links the freestanding libws.a).
+# Uses ordinary sockets, so it compiles against host libc unlike the demo server.
+example: build
+    {{cc}} {{testflags}} examples/echo/echo.c {{build_dir}}/libws.a -o {{build_dir}}/echo
+    @echo "built {{build_dir}}/echo — run it, then connect to ws://127.0.0.1:9002"
+
 # Local performance measurement.
 bench: _mkdir
     #!/usr/bin/env bash
