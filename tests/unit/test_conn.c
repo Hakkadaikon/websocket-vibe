@@ -262,6 +262,18 @@ static void test_recv_valid_close_code(void) {
     assert(ev.close_code == 1000);
 }
 
+static void test_recv_close_no_status(void) {
+    // M-07: payload なしの close は 1005(No Status Rcvd)センチネルで通知される。
+    // Lean recvCloseCode の「長さ<2 → 1005」分岐に対応。
+    reset();
+    u8 f[16];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, NULL, 0);
+    feed_all(f, n);
+    ws_event ev;
+    assert(ws_conn_poll(&C, &ev) == WS_EV_CLOSE);
+    assert(ev.close_code == 1005);
+}
+
 static void test_send_close_sanitizes_code(void) {
     // M-06: 予約コード(1006)は決して送出されてはならず、1000 に丸められる。
     reset();
@@ -323,6 +335,7 @@ int main(void) {
     test_client_mask_key_random();
     test_recv_invalid_close_code();
     test_recv_valid_close_code();
+    test_recv_close_no_status();
     test_send_close_sanitizes_code();
     test_split_across_recv();
     printf("test_conn: all passed\n");
