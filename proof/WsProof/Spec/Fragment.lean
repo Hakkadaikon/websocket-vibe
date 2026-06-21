@@ -120,10 +120,6 @@ theorem no_interleave {fs : List Frame} (h : WellFormedMsg fs) :
       simp only [List.tail_cons] at hg
       exact hrest.all_continuation g hg
 
-/-- データのみを acc に追加する(制御フレームも区別せず追加する素朴版)。 -/
-def feedData (acc : List UInt8) (f : Frame) : List UInt8 :=
-  acc ++ f.payload
-
 /-- 集約状態への1フレーム投入。制御フレームは acc を変えない。 -/
 def feed (acc : List UInt8) (f : Frame) : List UInt8 :=
   if f.opcode.isControl then acc else acc ++ f.payload
@@ -145,10 +141,8 @@ theorem feed_filters_control (acc : List UInt8) (fs : List Frame) :
   | cons f rest ih =>
       simp only [List.foldl_cons, List.filter_cons]
       by_cases hc : f.opcode.isControl
-      · -- 制御フレーム: feed は acc を変えず、filter からも除外。
-        simp [feed, hc, ih]
-      · -- データフレーム: feed が payload を追加、filter は残す。
-        have hc' : f.opcode.isControl = false := by
+      · simp [feed, hc, ih]
+      · have hc' : f.opcode.isControl = false := by
           simpa using hc
         simp only [feed, hc', Bool.not_false, if_true]
         rw [ih]

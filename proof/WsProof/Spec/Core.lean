@@ -18,11 +18,6 @@ def Opcode.isControl : Opcode → Bool
   | .close | .ping | .pong => true
   | _ => false
 
-/-- データ系の妥当 opcode か。 -/
-def Opcode.isData : Opcode → Bool
-  | .continuation | .text | .binary => true
-  | _ => false
-
 /-- パース済みフレームヘッダ + payload(仕様モデル)。 -/
 structure Frame where
   fin     : Bool
