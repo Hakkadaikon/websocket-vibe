@@ -17,7 +17,8 @@ static size_t b64_tail2(char *out, const u8 *data, size_t rem) {
     v |= (rem == 2) ? ((u32) data[1] << 8) : 0u;
     b64_quad(out, v);
     out[3] = '=';
-    out[2] = (rem == 2) ? out[2] : '=';
+    if (rem == 1)
+        out[2] = '='; // 1 input byte -> two pad chars
     return 4;
 }
 
