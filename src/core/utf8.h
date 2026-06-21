@@ -10,7 +10,7 @@
 // Incremental validator state. Zero-initialize to start.
 typedef struct {
     u8 remaining; // continuation bytes still expected (0 = at boundary)
-    u8 lo, hi;     // allowed range for the NEXT continuation byte
+    u8 lo, hi;    // allowed range for the NEXT continuation byte
 } ws_utf8_state;
 
 // Feed `len` bytes. Returns false on the first ill-formed byte.
