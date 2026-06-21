@@ -1,42 +1,42 @@
 #include "core/utf8.h"
 
-// Lead-byte dispatch matching the proven branch boundaries
-// (WsProof.Utf8): sets sequence length and the allowed range for the FIRST
-// continuation byte (subsequent ones are always 0x80..0xBF).
-// Returns false if `b` is not a valid lead/ASCII byte.
+// 証明済みの分岐境界 (WsProof.Utf8) に一致する先頭バイトのディスパッチ:
+// シーケンス長と、最初の継続バイトに許される範囲を設定する
+// (以降の継続バイトは常に 0x80..0xBF)。
+// `b` が有効な先頭/ASCII バイトでなければ false を返す。
 static void set_seq(ws_utf8_state *s, u8 remaining, u8 lo, u8 hi) {
     s->remaining = remaining;
     s->lo = lo;
     s->hi = hi;
 }
 
-// 3-byte leads: E0 forbids overlong (1st cont >= A0), ED forbids surrogates
-// (1st cont <= 9F), otherwise the generic 80..BF range.
+// 3 バイト先頭: E0 は冗長符号化を禁止 (最初の継続 >= A0)、ED はサロゲートを禁止
+// (最初の継続 <= 9F)、それ以外は汎用の 80..BF 範囲。
 static void lead_3byte(ws_utf8_state *s, u8 b) {
     u8 lo = (b == 0xE0) ? 0xA0 : 0x80;
     u8 hi = (b == 0xED) ? 0x9F : 0xBF;
     set_seq(s, 2, lo, hi);
 }
 
-// 4-byte leads: F0 forbids overlong (1st cont >= 90), F4 caps at U+10FFFF
-// (1st cont <= 8F), otherwise generic.
+// 4 バイト先頭: F0 は冗長符号化を禁止 (最初の継続 >= 90)、F4 は U+10FFFF で上限
+// (最初の継続 <= 8F)、それ以外は汎用範囲。
 static void lead_4byte(ws_utf8_state *s, u8 b) {
     u8 lo = (b == 0xF0) ? 0x90 : 0x80;
     u8 hi = (b == 0xF4) ? 0x8F : 0xBF;
     set_seq(s, 3, lo, hi);
 }
 
-// ASCII (single byte). Already a complete sequence.
+// ASCII (1 バイト)。すでに完結したシーケンス。
 static void lead_ascii(ws_utf8_state *s) {
     s->remaining = 0;
 }
 
-// 2-byte leads C2..DF: generic continuation range.
+// 2 バイト先頭 C2..DF: 汎用の継続範囲。
 static void lead_2byte(ws_utf8_state *s) {
     set_seq(s, 1, 0x80, 0xBF);
 }
 
-// Each tester returns the lead's arity (0=ASCII,1..3) or -1 if not this class.
+// 各テスターは先頭バイトの追加バイト数 (0=ASCII,1..3) を返す。該当しなければ -1。
 static int try_ascii(ws_utf8_state *s, u8 b) {
     if (b > 0x7F)
         return -1;
@@ -68,7 +68,7 @@ static int try_4byte(ws_utf8_state *s, u8 b) {
 typedef int (*lead_tester)(ws_utf8_state *, u8);
 
 static bool classify_lead(ws_utf8_state *s, u8 b) {
-    // 0x80..0xC1 (incl. overlong C0/C1) and 0xF5..0xFF match nothing.
+    // 0x80..0xC1 (冗長な C0/C1 を含む) と 0xF5..0xFF はどれにも該当しない。
     static const lead_tester testers[] = {try_ascii, try_2byte, try_3byte, try_4byte};
     for (size_t k = 0; k < sizeof(testers) / sizeof(testers[0]); k++) {
         if (testers[k](s, b) >= 0)
@@ -77,7 +77,7 @@ static bool classify_lead(ws_utf8_state *s, u8 b) {
     return false;
 }
 
-// Continuation byte: must lie in the currently allowed range.
+// 継続バイト: 現在許容されている範囲に収まらなければならない。
 static bool cont_in_range(const ws_utf8_state *s, u8 b) {
     return b >= s->lo && b <= s->hi;
 }
@@ -86,7 +86,7 @@ static bool feed_cont(ws_utf8_state *s, u8 b) {
     if (!cont_in_range(s, b))
         return false;
     s->remaining--;
-    // After the first continuation, the range relaxes to the generic one.
+    // 最初の継続バイト以降は範囲が汎用のものに緩和される。
     s->lo = 0x80;
     s->hi = 0xBF;
     return true;

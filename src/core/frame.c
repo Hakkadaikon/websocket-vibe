@@ -1,6 +1,6 @@
 #include "core/frame.h"
 
-// --- big-endian helpers (proven model: fromBE / byteAt) ---
+// --- ビッグエンディアン補助 (Lean モデル fromBE / byteAt に対応) ---
 
 static u64 read_be(const u8 *p, size_t n) {
     u64 v = 0;
@@ -14,32 +14,32 @@ static void write_be(u8 *p, size_t n, u64 v) {
         p[n - 1 - i] = (u8) (v >> (8 * i));
 }
 
-// --- parse ---
+// --- パース ---
 
-// 2-byte extended length (len7 == 126). Enforces minimal encoding.
+// 2 バイト拡張長 (len7 == 126)。最小符号化を強制する。
 static ws_parse_status parse_len16(const u8 *buf, size_t len, u64 *out_len, size_t *extra) {
     if (len < 4)
         return WS_PARSE_NEED_MORE;
     u64 v = read_be(buf + 2, 2);
-    if (v < 126) // non-minimal: should have used 1-byte form
+    if (v < 126) // 非最小: 1 バイト形式で表せる値はそちらを使うべき
         return WS_PARSE_ERROR;
     *out_len = v;
     *extra = 2;
     return WS_PARSE_OK;
 }
 
-// Validate a decoded 8-byte length: high bit clear (RFC6455 §5.2) and minimal
-// (must have used the 2-byte form for values that fit).
+// デコード済みの 8 バイト長を検証する: 最上位ビットが 0 (RFC6455 §5.2) で、
+// かつ最小符号化であること (収まる値は 2 バイト形式を使うべき)。
 static ws_parse_status check_len64(u64 v) {
-    if (v & 0x8000000000000000u) // high bit must be 0 (RFC6455 §5.2)
+    if (v & 0x8000000000000000u) // 最上位ビットは 0 でなければならない (RFC6455 §5.2)
         return WS_PARSE_ERROR;
-    if (v <= 0xFFFF) // non-minimal: should have used 2-byte form
+    if (v <= 0xFFFF) // 非最小: 2 バイト形式で表せる値はそちらを使うべき
         return WS_PARSE_ERROR;
     return WS_PARSE_OK;
 }
 
-// 8-byte extended length (len7 == 127). Enforces minimal encoding and the
-// reserved high bit (RFC6455 §5.2).
+// 8 バイト拡張長 (len7 == 127)。最小符号化と予約された最上位ビット
+// (RFC6455 §5.2) を強制する。
 static ws_parse_status parse_len64(const u8 *buf, size_t len, u64 *out_len, size_t *extra) {
     if (len < 10)
         return WS_PARSE_NEED_MORE;
@@ -52,8 +52,8 @@ static ws_parse_status parse_len64(const u8 *buf, size_t len, u64 *out_len, size
     return WS_PARSE_OK;
 }
 
-// Decode the length field; sets *extra to extra bytes after the 2nd byte.
-// Returns parse status; enforces minimal (canonical) encoding.
+// 長さフィールドをデコードする。*extra に 2 バイト目以降の追加バイト数を設定する。
+// パース状態を返す。最小 (正準) 符号化を強制する。
 static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_len, size_t *extra) {
     if (len7 < 126) {
         *out_len = len7;
@@ -65,18 +65,18 @@ static ws_parse_status parse_len(const u8 *buf, size_t len, u8 len7, u64 *out_le
     return parse_len64(buf, len, out_len, extra);
 }
 
-// Fill the 4-byte mask key from src, or zero it when src is null.
+// 4 バイトのマスクキーを src から埋める。src が null のときはゼロ埋めする。
 static void fill_mask_key(u8 dst[4], const u8 *src) {
     for (size_t i = 0; i < 4; i++)
         dst[i] = src ? src[i] : 0;
 }
 
-// Header bytes contributed by the masking key (4 if masked, else 0).
+// マスクキーが占めるヘッダバイト数 (マスクありなら 4、なしなら 0)。
 static size_t mask_len(bool masked) {
     return masked ? 4u : 0u;
 }
 
-// Unpack the first header byte (FIN/RSV/opcode) into out.
+// 先頭ヘッダバイト (FIN/RSV/opcode) を out に展開する。
 static void unpack_b0(ws_frame_header *out, u8 b0) {
     out->fin = (b0 & 0x80u) != 0;
     out->rsv1 = (b0 & 0x40u) != 0;
@@ -85,8 +85,8 @@ static void unpack_b0(ws_frame_header *out, u8 b0) {
     out->opcode = b0 & 0x0Fu;
 }
 
-// Fill out from a validated header: b0 flags, mask key, length and totals.
-// `extra` is the length-field byte count after byte 1; `plen` the payload len.
+// 検証済みヘッダから out を埋める: b0 のフラグ、マスクキー、長さ、合計。
+// `extra` は 1 バイト目以降の長さフィールドのバイト数、`plen` はペイロード長。
 static void fill_header(ws_frame_header *out, const u8 *buf, bool masked, size_t extra, u64 plen) {
     const u8 *key = masked ? buf + 2 + extra : NULL;
     unpack_b0(out, buf[0]);
@@ -96,8 +96,8 @@ static void fill_header(ws_frame_header *out, const u8 *buf, bool masked, size_t
     fill_mask_key(out->mask_key, key);
 }
 
-// Decode length and verify the full header (incl. mask key) is buffered.
-// On OK, *plen/*extra are set and *masked reflects the mask flag.
+// 長さをデコードし、ヘッダ全体 (マスクキー含む) がバッファ済みか検証する。
+// OK のとき *plen/*extra が設定され、*masked がマスクフラグを反映する。
 static ws_parse_status parse_meta(const u8 *buf, size_t len, bool *masked, u64 *plen,
                                   size_t *extra) {
     ws_parse_status st = parse_len(buf, len, buf[1] & 0x7Fu, plen, extra);
@@ -124,9 +124,9 @@ ws_parse_status ws_frame_parse_header(const u8 *buf, size_t len, ws_frame_header
     return WS_PARSE_OK;
 }
 
-// --- build ---
+// --- ビルド ---
 
-// Extra length bytes (beyond the first 2 header bytes) for a payload length.
+// あるペイロード長に必要な追加長バイト数 (先頭 2 ヘッダバイトを除く)。
 static size_t len_extra(u64 payload_len) {
     if (payload_len <= 125)
         return 0;
@@ -135,8 +135,8 @@ static size_t len_extra(u64 payload_len) {
     return 8;
 }
 
-// Emit length field into buf starting at index 1; returns total header bytes
-// before the (optional) mask key. Always minimal form.
+// 長さフィールドを buf のインデックス 1 から書き出す。(任意の) マスクキーの
+// 直前までのヘッダ総バイト数を返す。常に最小形式で出力する。
 static size_t build_len(u8 *buf, u64 payload_len) {
     if (payload_len <= 125) {
         buf[1] = (u8) payload_len;
@@ -152,7 +152,7 @@ static size_t build_len(u8 *buf, u64 payload_len) {
     return 10;
 }
 
-// Append the masking flag and key at index n; returns new header length.
+// マスクフラグとキーをインデックス n に追加する。新しいヘッダ長を返す。
 static size_t append_mask(u8 *buf, size_t n, const u8 mask_key[4]) {
     buf[1] |= 0x80u;
     for (size_t i = 0; i < 4; i++)
@@ -160,7 +160,7 @@ static size_t append_mask(u8 *buf, size_t n, const u8 mask_key[4]) {
     return n + 4;
 }
 
-// First header byte: FIN flag plus the 4-bit opcode.
+// 先頭ヘッダバイト: FIN フラグと 4 ビットの opcode。
 static u8 pack_b0(bool fin, u8 opcode) {
     return (u8) ((fin ? 0x80u : 0u) | (opcode & 0x0Fu));
 }
