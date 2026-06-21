@@ -95,7 +95,7 @@ static size_t sha1_pad(u8 buf[128], const u8 *tail, size_t rem, u64 len) {
     return total;
 }
 
-static void sha1_emit(const u32 h[5], u8 out[20]) {
+static void sha1_emit(const u32 h[5], u8 out[WS_SHA1_DIGEST_LEN]) {
     for (size_t k = 0; k < 5; k++) {
         out[4 * k] = (u8) (h[k] >> 24);
         out[4 * k + 1] = (u8) (h[k] >> 16);
@@ -104,7 +104,7 @@ static void sha1_emit(const u32 h[5], u8 out[20]) {
     }
 }
 
-void ws_sha1(const u8 *data, size_t len, u8 out[20]) {
+void ws_sha1(const u8 *data, size_t len, u8 out[WS_SHA1_DIGEST_LEN]) {
     u32 h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
 
     size_t i = sha1_blocks(h, data, len);

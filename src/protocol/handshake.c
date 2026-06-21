@@ -14,9 +14,9 @@ void ws_handshake_accept(const char *key, size_t key_len, char out[WS_ACCEPT_KEY
     for (size_t i = 0; GUID[i]; i++)
         buf[n++] = (u8) GUID[i];
 
-    u8 digest[20];
+    u8 digest[WS_SHA1_DIGEST_LEN];
     ws_sha1(buf, n, digest);
-    ws_base64_encode(digest, 20, out);
+    ws_base64_encode(digest, WS_SHA1_DIGEST_LEN, out);
 }
 
 static char lower(char c) {
