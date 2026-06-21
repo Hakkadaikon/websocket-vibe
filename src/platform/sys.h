@@ -1,11 +1,11 @@
-// ws platform — x86-64 Linux syscalls (freestanding, no libc).
+// ws platform — x86-64 Linux システムコール (フリースタンディング、libc なし)。
 #ifndef WS_PLATFORM_SYS_H
 #define WS_PLATFORM_SYS_H
 
 #include "ws/types.h"
 
-// Thin syscall wrappers. Return value follows the kernel ABI: negative is
-// -errno. Only the subset the server loop needs.
+// 薄いシステムコールラッパー。戻り値はカーネル ABI に従い、負値は -errno。
+// サーバループに必要な部分集合のみを提供する。
 i64 sys_read(int fd, void *buf, size_t n);
 i64 sys_write(int fd, const void *buf, size_t n);
 int sys_close(int fd);
@@ -14,11 +14,11 @@ int sys_setsockopt(int fd, int level, int optname, const void *optval, u32 optle
 int sys_bind(int fd, const void *addr, u32 addrlen);
 int sys_listen(int fd, int backlog);
 int sys_accept(int fd, void *addr, u32 *addrlen);
-// Fill buf with n cryptographically-strong random bytes. Returns bytes written
-// (negative is -errno). Used for client frame masking keys (RFC6455 §5.3).
+// buf を暗号論的に強い乱数 n バイトで埋める。書き込んだバイト数を返す
+// (負値は -errno)。クライアントフレームのマスクキーに使う (RFC6455 §5.3)。
 i64 sys_getrandom(void *buf, size_t n);
 
-// epoll-based readiness multiplexing for the concurrent demo server.
+// 並行デモサーバ向けの epoll ベースの readiness 多重化。
 int sys_epoll_create1(int flags);
 int sys_epoll_ctl(int epfd, int op, int fd, void *ev);
 int sys_epoll_wait(int epfd, void *evs, int maxevents, int timeout);
@@ -26,18 +26,18 @@ int sys_set_nonblock(int fd);
 
 void sys_exit(int code) __attribute__((noreturn));
 
-// Constants we need (Linux/x86-64).
+// 必要な定数 (Linux/x86-64)。
 #define WS_AF_INET      2
 #define WS_SOCK_STREAM  1
 #define WS_SOL_SOCKET   1
 #define WS_SO_REUSEADDR 2
 #define WS_INADDR_ANY   0
 
-// sockaddr_in laid out per the kernel ABI.
+// カーネル ABI に従ったレイアウトの sockaddr_in。
 typedef struct {
     u16 sin_family;
-    u16 sin_port; // network byte order
-    u32 sin_addr; // network byte order
+    u16 sin_port; // ネットワークバイトオーダー
+    u32 sin_addr; // ネットワークバイトオーダー
     u8 sin_zero[8];
 } ws_sockaddr_in;
 
@@ -45,15 +45,15 @@ static inline u16 ws_htons(u16 x) {
     return (u16) ((x << 8) | (x >> 8));
 }
 
-// epoll constants (Linux/x86-64).
+// epoll 定数 (Linux/x86-64)。
 #define WS_EPOLL_CTL_ADD 1
 #define WS_EPOLL_CTL_DEL 2
 #define WS_EPOLLIN       0x001u
 
-// struct epoll_event is packed on x86-64 (no padding between events/data).
+// x86-64 では struct epoll_event はパックされている (events/data 間にパディングなし)。
 typedef struct __attribute__((packed)) {
     u32 events;
-    u64 data; // we store the fd here
+    u64 data; // ここに fd を格納する
 } ws_epoll_event;
 
-#endif // WS_PLATFORM_SYS_H
+#endif // WS_PLATFORM_SYS_H のガード終端

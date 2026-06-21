@@ -1,4 +1,4 @@
-// x86-64 Linux syscalls via inline asm. Syscall numbers from the kernel ABI.
+// インラインアセンブリ経由の x86-64 Linux システムコール。番号はカーネル ABI に従う。
 #include "platform/sys.h"
 
 #define SYS_read          0
@@ -72,7 +72,7 @@ int sys_accept(int fd, void *addr, u32 *addrlen) {
     return (int) syscall3(SYS_accept, fd, (i64) addr, (i64) addrlen);
 }
 i64 sys_getrandom(void *buf, size_t n) {
-    return syscall3(SYS_getrandom, (i64) buf, (i64) n, 0); // flags=0: block until seeded
+    return syscall3(SYS_getrandom, (i64) buf, (i64) n, 0); // flags=0: シード完了までブロック
 }
 
 int sys_epoll_create1(int flags) {

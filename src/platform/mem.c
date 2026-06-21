@@ -1,5 +1,6 @@
-// Freestanding mem* — clang may emit calls to these from builtins, so they
-// must exist. Byte-wise; correctness over speed (bench layer optimizes hot paths).
+// フリースタンディングな mem* — clang がビルトインからこれらの呼び出しを生成し
+// うるため、必ず存在させる必要がある。バイト単位で実装し、速度より正しさを優先する
+// (ホットパスはベンチ層で最適化する)。
 #include "platform/mem.h"
 
 void *ws_memcpy(void *dst, const void *src, size_t n) {
