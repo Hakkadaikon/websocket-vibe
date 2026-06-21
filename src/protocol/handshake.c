@@ -25,27 +25,49 @@ static char lower(char c) {
     return c;
 }
 
+// True if `req[at..]` (within len) matches name char `name[i]` case-insensitively.
+static int name_char_eq(const char *req, size_t len, size_t at, const char *name, size_t i) {
+    return at + i < len && lower(req[at + i]) == lower(name[i]);
+}
+
 // Case-insensitive compare of `req[at..]` against header name `name` (NUL-term).
 // Returns name length on match, else 0.
 static size_t match_name(const char *req, size_t len, size_t at, const char *name) {
     size_t i = 0;
     for (; name[i]; i++) {
-        if (at + i >= len || lower(req[at + i]) != lower(name[i]))
+        if (!name_char_eq(req, len, at, name, i))
             return 0;
     }
     return i;
 }
 
+static int is_hws(char c) {
+    return c == ' ' || c == '\t';
+}
+
+static int is_eol(char c) {
+    return c == '\r' || c == '\n';
+}
+
+// Skip leading horizontal whitespace from `s` (bounded by len).
+static size_t skip_hws(const char *req, size_t len, size_t s) {
+    while (s < len && is_hws(req[s]))
+        s++;
+    return s;
+}
+
+// Advance from `s` to the first EOL char (bounded by len).
+static size_t to_eol(const char *req, size_t len, size_t s) {
+    while (s < len && !is_eol(req[s]))
+        s++;
+    return s;
+}
+
 // Length of the header value at `start`, trimming leading WS and stopping at \r or \n.
 static size_t value_span(const char *req, size_t len, size_t *start) {
-    size_t s = *start;
-    while (s < len && (req[s] == ' ' || req[s] == '\t'))
-        s++;
-    size_t e = s;
-    while (e < len && req[e] != '\r' && req[e] != '\n')
-        e++;
+    size_t s = skip_hws(req, len, *start);
     *start = s;
-    return e - s;
+    return to_eol(req, len, s) - s;
 }
 
 size_t ws_handshake_find_key(const char *req, size_t len, const char **val) {
