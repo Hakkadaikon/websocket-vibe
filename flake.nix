@@ -30,6 +30,7 @@
             lld_19
             llvmPackages_19.clang-tools  # clang-tidy, clang-format
             just
+            binutils          # readelf, nm — freestanding linkage check
             lizard            # cyclomatic complexity
             python3           # E2E websocket reference client + bench harness
           ];
