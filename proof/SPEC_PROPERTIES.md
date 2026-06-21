@@ -108,5 +108,18 @@
 
 ## C 実装との対応
 証明した step 関数/述語を、`conn.c` の `consume_frame`/`header_ok`/`accept_data`/`accept_control` の
-分岐構造に1対1で対応させ、その対応を C ユニットテスト(`test_conn.c` 拡張)で test-first に確認する。
+分岐構造に1対1で対応させ、その対応を C ユニットテスト(`test_conn.c`/`test_frame.c`)で test-first に確認する。
 これにより proof と実装の乖離をテストが検出する(数学性質3定理と同じ橋渡し方式)。
+
+橋渡しテストで炙り出した乖離と修正:
+- **S-04**: `consume_frame` が CLOSING 状態でもデータフレームを受理し MESSAGE を出していた
+  (証明モデルは closing+data → discard)。`m->state == WS_ST_OPEN` のときのみ `accept_data` を呼ぶよう修正。
+  → `test_data_discarded_after_close_recv`。
+- **M-07**: `accept_control` が受信 close code を無検証で通していた。`valid_close_code`(§7.4.1 の許容域)を
+  追加し、域外は 1002 へ。→ `test_recv_invalid_close_code` / `test_recv_valid_close_code`。
+- **M-06**: `ws_send_close` が予約コード(1005/1006/1015)をそのまま載せ得た。`reserved_close_code` で 1000 へ丸める。
+  → `test_send_close_sanitizes_code`。
+- **F-09 / F-10**: `frame.c` の `parse_len` が既に非最小長拒否・64bit MSB 拒否を実装済み(乖離なし)。
+  → `test_frame.c::test_reject_non_minimal`。
+- S-03(`test_no_data_after_close_sent`)/ C-05(`test_pong_echoes_ping_payload`)/
+  C-06(`test_unsolicited_pong`)は現実装のまま橋渡しテストで固定。
