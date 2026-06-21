@@ -284,8 +284,29 @@ static void test_split_across_recv(void) {
     assert(ev.len == 5 && memcmp(ev.data, "split", 5) == 0);
 }
 
+// 同一接続で複数メッセージを連続受信する: 各メッセージを別 recv で流し、
+// 間で poll してドレインする (echo サーバの serve ループと同じ順序)。
+// 後続メッセージのペイロードが集約バッファ内で前メッセージ長ぶんずれた位置に
+// ステージされるため、begin_message のリセットと重なって前方オーバーラップ
+// コピーになり、UTF-8 検査が壊れたバイトを読む退行があった。
+static void test_consecutive_text_messages(void) {
+    reset();
+    const char *msgs[] = {"unko", "テストテストテスト"}; // 2 件目で退行が出ていた
+    ws_event ev;
+    for (size_t i = 0; i < 2; i++) {
+        u8 f[64];
+        size_t plen = strlen(msgs[i]);
+        size_t n = mk_frame(f, true, WS_OP_TEXT, (const u8 *) msgs[i], plen);
+        feed_all(f, n);
+        assert(ws_conn_poll(&C, &ev) == WS_EV_MESSAGE);
+        assert(ev.len == plen && memcmp(ev.data, msgs[i], plen) == 0);
+        assert(ws_conn_poll(&C, &ev) == WS_EV_NONE);
+    }
+}
+
 int main(void) {
     test_single_text();
+    test_consecutive_text_messages();
     test_fragmented();
     test_control_interleaved();
     test_reject_unmasked_client_frame();
