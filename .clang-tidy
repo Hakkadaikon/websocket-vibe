@@ -1,0 +1,9 @@
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  -bugprone-easily-swappable-parameters,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'

@@ -1,0 +1,7 @@
+/build/
+/proof/.lake/
+/proof/lake-manifest.json
+result
+__pycache__/
+*.o
+*.a
