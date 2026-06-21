@@ -4,6 +4,7 @@ Checks: >
   cert-*,
   -bugprone-easily-swappable-parameters,
   -cert-dcl37-c,
-  -cert-dcl51-cpp
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*'
+  -cert-dcl51-cpp,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(src|include)/.*\.h$'
